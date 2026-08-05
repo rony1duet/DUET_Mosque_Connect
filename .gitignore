@@ -3,6 +3,7 @@
 .idea/
 .kotlin/
 .gradle/
+.artifacts/
 
 # Local developer settings (contains your local Android SDK path)
 local.properties
