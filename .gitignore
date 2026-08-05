@@ -1,18 +1,70 @@
-# IDE / Android Studio configurations
-*.iml
-.idea/
-.kotlin/
-.gradle/
-.artifacts/
+### Android / Gradle / Kotlin project .gitignore ###
 
-# Local developer settings (contains your local Android SDK path)
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+release/
+
+# Gradle files
+.gradle/
+build/
+**/build/
+captures/
+.cxx/
+.externalNativeBuild/
+
+# Local configuration file (contains SDK path, sometimes API keys)
 local.properties
 
-# Build outputs and generated caching artifacts
-build/
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+.navigation/
 captures/
-.externalNativeBuild/
-.cxx/
+.externalNativeBuild
+.cxx
+*.hprof
 
-# Operating System files
+# Keystore files (never commit real signing keys)
+*.jks
+*.keystore
+
+# Google Services / Firebase config (contains project keys)
+# Remove this line if you intentionally want to version-control it
+app/google-services.json
+
+# Log/OS files
+*.log
 .DS_Store
+Thumbs.db
+
+# Kotlin
+.kotlin/
+
+# NDK
+obj/
+
+# Version control backups
+*.orig
+
+# Node (if any JS tooling is used, e.g. for CI scripts)
+node_modules/
+
+# Misc
+*.bak
+*.tmp
