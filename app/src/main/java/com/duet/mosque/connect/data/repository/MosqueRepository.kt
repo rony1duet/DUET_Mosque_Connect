@@ -46,11 +46,11 @@ class MosqueRepository(private val context: Context) {
         // Seed Fasting & Solar Limits
         ramadanDao.insertRamadanSchedule(
             RamadanEntity(
-                sehriTime = "0:00",
-                iftarTime = "0:00",
+                sehriTime = "04:30 AM",
+                iftarTime = "06:45 PM",
                 taraweehTime = "09:00 PM",
-                sunriseTime = "5:24 AM",
-                sunsetTime = "6:46 PM",
+                sunriseTime = "05:24 AM",
+                sunsetTime = "06:46 PM",
                 notes = "Current Fasting & Solar Limits for DUET Central Mosque."
             )
         )
@@ -61,7 +61,7 @@ class MosqueRepository(private val context: Context) {
             announcementDao.insertAnnouncement(
                 AnnouncementEntity(
                     title = "Central Mosque Digital Platform Launched",
-                    content = "Assalamu Alaikum. Welcome to the official DUET Mosque Connect platform. Daily prayers and Jamat time updates will be synchronized here directly by the Imam."
+                    content = "Assalamu Alaikum. Welcome to the official DUET Mosque Connect platform. Daily prayers, Azan times, and Jamat time updates will be synchronized here directly by the Imam."
                 )
             )
 
@@ -76,31 +76,21 @@ class MosqueRepository(private val context: Context) {
                 )
             )
 
-            // Seed Janaza
-            janazaDao.insertJanaza(
-                JanazaEntity(
-                    name = "Father of Dr. Aminul Islam (EEE Dept)",
-                    date = "2026-07-21",
-                    time = "02:00 PM",
-                    location = "DUET Central Mosque Yard"
-                )
-            )
-
             // Seed Eid
             eidDao.insertEidSchedule(
                 EidEntity(
                     prayerTime = "07:30 AM",
                     takbirReminder = "Takbir recitations begin at 07:15 AM",
                     parkingInfo = "Student parking at DUET Central Playground. Teacher parking near Administrative building.",
-                    specialNotice = "Bring your own prayer mat. Wearing masks is recommended."
+                    specialNotice = "Bring your own prayer mat."
                 )
             )
         }
     }
 
     // Update Prayer Times
-    suspend fun updatePrayerTime(id: String, name: String, start: String, jamat: String) {
-        prayerTimeDao.updatePrayerTime(PrayerTimeEntity(id, name, start, jamat))
+    suspend fun updatePrayerTime(id: String, name: String, azanTime: String, jamat: String) {
+        prayerTimeDao.updatePrayerTime(PrayerTimeEntity(id, name, azanTime, jamat))
     }
 
     // Add Announcement

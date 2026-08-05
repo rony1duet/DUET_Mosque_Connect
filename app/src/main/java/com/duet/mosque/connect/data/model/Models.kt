@@ -9,7 +9,7 @@ import java.util.UUID
 data class PrayerTimeEntity(
     @PrimaryKey val id: String, // "fajr", "zuhr", "asr", "maghrib", "isha", "jummah"
     val name: String,
-    val startTime: String,
+    val azanTime: String,
     val jamatTime: String
 )
 
@@ -49,11 +49,11 @@ data class JanazaEntity(
 @Entity(tableName = "ramadan")
 data class RamadanEntity(
     @PrimaryKey val id: Int = 1,
-    val sehriTime: String = "0:00",
-    val iftarTime: String = "0:00",
+    val sehriTime: String = "04:30 AM",
+    val iftarTime: String = "06:45 PM",
     val taraweehTime: String = "09:00 PM",
-    val sunriseTime: String = "5:24 AM",
-    val sunsetTime: String = "6:46 PM",
+    val sunriseTime: String = "05:24 AM",
+    val sunsetTime: String = "06:46 PM",
     val notes: String = "Current Fasting & Solar Limits for DUET Central Mosque"
 )
 
@@ -70,7 +70,7 @@ data class EidEntity(
 // Simple data class for Imam's Contact Information
 data class ImamContact(
     val name: String = "Hafez Mawlana Md. Abdul Muktadir",
-    val phone: String = "+8801712345678",
+    val phone: String = "+880 1700-000000",
     val email: String = "imam.mosque@duet.ac.bd",
     val officeHours: String = "Between Asr and Maghrib, Imam's Office, DUET Central Mosque"
 )

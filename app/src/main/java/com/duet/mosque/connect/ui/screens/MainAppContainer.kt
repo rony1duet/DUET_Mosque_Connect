@@ -20,6 +20,8 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.ui.draw.scale
 import kotlin.math.abs
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -131,9 +133,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.duet.mosque.connect.data.model.AnnouncementEntity
+import com.duet.mosque.connect.data.model.EidEntity
 import com.duet.mosque.connect.data.model.EventEntity
 import com.duet.mosque.connect.data.model.JanazaEntity
 import com.duet.mosque.connect.data.model.PrayerTimeEntity
+import com.duet.mosque.connect.data.model.RamadanEntity
 import com.duet.mosque.connect.ui.theme.CreamAccent
 import com.duet.mosque.connect.ui.theme.EmeraldGreen
 import com.duet.mosque.connect.ui.theme.EmeraldGreenDark
@@ -275,6 +279,9 @@ fun HomeScreen(viewModel: MosqueViewModel, onNavigateToTab: (TabScreen) -> Unit)
     val notices by viewModel.announcements.collectAsState()
     val compassState by viewModel.compassState.collectAsState()
     val ramadan by viewModel.ramadanSchedule.collectAsState()
+    val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
+
+    var showRamadanEditDialog by remember { mutableStateOf(false) }
 
     val currentDate = remember {
         val formatter = SimpleDateFormat("EEEE, d MMMM yyyy", Locale.US)
@@ -507,7 +514,7 @@ fun HomeScreen(viewModel: MosqueViewModel, onNavigateToTab: (TabScreen) -> Unit)
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
@@ -517,72 +524,144 @@ fun HomeScreen(viewModel: MosqueViewModel, onNavigateToTab: (TabScreen) -> Unit)
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Fasting & Solar Limits",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldGreen
-                            )
-                            Text(
-                                text = "DUET Central Mosque",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            )
+                            Column {
+                                Text(
+                                    text = "Fasting & Solar Limits",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen
+                                )
+                                Text(
+                                    text = "DUET Central Mosque Daily Schedule",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                )
+                            }
+                            if (isAdminLoggedIn) {
+                                IconButton(
+                                    onClick = { showRamadanEditDialog = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Fasting & Solar Limits",
+                                        tint = EmeraldGreen,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            // Sehri
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.background)
-                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                    .padding(vertical = 10.dp, horizontal = 2.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text(text = "Sehri", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(text = r.sehriTime, fontSize = 14.sp, fontWeight = FontWeight.Black, color = EmeraldGreen)
+                                Text(
+                                    text = "Sehri",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                    maxLines = 1
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = r.sehriTime,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
+                            // Iftar
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.background)
-                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                    .padding(vertical = 10.dp, horizontal = 2.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text(text = "Iftar", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(text = r.iftarTime, fontSize = 14.sp, fontWeight = FontWeight.Black, color = GoldAccent)
+                                Text(
+                                    text = "Iftar",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                    maxLines = 1
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = r.iftarTime,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GoldAccent,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
+                            // Sunrise
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.background)
-                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                    .padding(vertical = 10.dp, horizontal = 2.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text(text = "Sunrise", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(text = r.sunriseTime, fontSize = 14.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                                Text(
+                                    text = "Sunrise",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                    maxLines = 1
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = r.sunriseTime,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
+                            // Sunset
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.background)
-                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                    .padding(vertical = 10.dp, horizontal = 2.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text(text = "Sunset", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(text = r.sunsetTime, fontSize = 14.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                                Text(
+                                    text = "Sunset",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                    maxLines = 1
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = r.sunsetTime,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
                         }
                     }
@@ -667,6 +746,24 @@ fun HomeScreen(viewModel: MosqueViewModel, onNavigateToTab: (TabScreen) -> Unit)
             Spacer(modifier = Modifier.height(8.dp))
         }
     }
+
+    if (showRamadanEditDialog) {
+        FastingSolarDialog(
+            currentRamadan = ramadan,
+            onDismiss = { showRamadanEditDialog = false },
+            onConfirmRamadan = { sehri, iftar, sunrise, sunset ->
+                viewModel.updateRamadanSchedule(
+                    sehri = sehri,
+                    iftar = iftar,
+                    taraweeh = ramadan?.taraweehTime ?: "09:00 PM",
+                    notes = ramadan?.notes ?: "DUET Mosque Schedule",
+                    sunrise = sunrise,
+                    sunset = sunset
+                )
+                showRamadanEditDialog = false
+            }
+        )
+    }
 }
 
 // 2. PRAYER TIMES SCREEN
@@ -721,6 +818,7 @@ fun PrayerTimesScreen(viewModel: MosqueViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         Text(
@@ -825,13 +923,24 @@ fun PrayerTimesScreen(viewModel: MosqueViewModel) {
                                     }
                                 }
                             }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Jamat: ${prayer.jamatTime}",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldGreen
-                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Azan: ${prayer.azanTime}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                                Text(
+                                    text = "Jamat: ${prayer.jamatTime}",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen
+                                )
+                            }
                         }
 
                         if (isAdminLoggedIn) {
@@ -858,7 +967,7 @@ fun PrayerTimesScreen(viewModel: MosqueViewModel) {
 
     // Edit Prayer Times Dialog
     editingPrayer?.let { prayer ->
-        var startInput by remember { mutableStateOf(prayer.startTime) }
+        var azanInput by remember { mutableStateOf(prayer.azanTime) }
         var jamatInput by remember { mutableStateOf(prayer.jamatTime) }
 
         AlertDialog(
@@ -866,7 +975,7 @@ fun PrayerTimesScreen(viewModel: MosqueViewModel) {
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.updatePrayerTime(prayer.id, prayer.name, startInput, jamatInput)
+                        viewModel.updatePrayerTime(prayer.id, prayer.name, azanInput, jamatInput)
                         editingPrayer = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
@@ -903,11 +1012,11 @@ fun PrayerTimesScreen(viewModel: MosqueViewModel) {
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
 
-                    // Athan Time Selector
+                    // Azan Time Selector
                     TimePickerClickableField(
-                        label = "Athan / Start Time",
-                        value = startInput,
-                        onTimeSelected = { startInput = it }
+                        label = "Azan Time",
+                        value = azanInput,
+                        onTimeSelected = { azanInput = it }
                     )
 
                     // Jamat Time Selector
@@ -1067,7 +1176,7 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                     .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
                 Text(
-                    text = if (isAligned) "✓ Perfectly Aligned with Qibla" else "Align your phone to find the Qibla",
+                    text = if (isAligned) "Perfectly Aligned with Qibla" else "Align your phone to find the Qibla",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (isAligned) EmeraldGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -1436,76 +1545,141 @@ fun AnnouncementsTab(viewModel: MosqueViewModel) {
     val announcements by viewModel.announcements.collectAsState()
     val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
 
-    if (announcements.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No announcements published.",
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-            )
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editingNotice by remember { mutableStateOf<AnnouncementEntity?>(null) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (isAdminLoggedIn) {
+            Button(
+                onClick = { showAddDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = TextLight)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Add New Notice / News", fontWeight = FontWeight.Bold)
+                }
+            }
         }
-    } else {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(announcements) { notice ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = notice.title,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldGreen
-                            )
-                            if (isAdminLoggedIn) {
-                                IconButton(
-                                    onClick = { viewModel.deleteAnnouncement(notice.id) },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete",
-                                        tint = NoticeRed,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+
+        if (announcements.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(top = 32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No announcements published.",
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(announcements) { notice ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = notice.title,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isAdminLoggedIn) {
+                                    Row {
+                                        IconButton(
+                                            onClick = { editingNotice = notice },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = "Edit",
+                                                tint = EmeraldGreen,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        IconButton(
+                                            onClick = { viewModel.deleteAnnouncement(notice.id) },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Delete",
+                                                tint = NoticeRed,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = notice.content,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                lineHeight = 18.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val formattedDate = remember(notice.timestamp) {
+                                val formatter = SimpleDateFormat("MMM d, yyyy - hh:mm a", Locale.US)
+                                formatter.format(Date(notice.timestamp))
+                            }
+                            Text(
+                                text = formattedDate,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                            )
                         }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = notice.content,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            lineHeight = 18.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        val formattedDate = remember(notice.timestamp) {
-                            val formatter = SimpleDateFormat("MMM d, yyyy - hh:mm a", Locale.US)
-                            formatter.format(Date(notice.timestamp))
-                        }
-                        Text(
-                            text = formattedDate,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                        )
                     }
                 }
             }
         }
+    }
+
+    if (showAddDialog) {
+        AnnouncementDialog(
+            dialogTitle = "Add Announcement",
+            initialTitle = "",
+            initialContent = "",
+            onDismiss = { showAddDialog = false },
+            onConfirm = { title, content ->
+                viewModel.addAnnouncement(title, content)
+                showAddDialog = false
+            }
+        )
+    }
+
+    editingNotice?.let { notice ->
+        AnnouncementDialog(
+            dialogTitle = "Edit Announcement",
+            initialTitle = notice.title,
+            initialContent = notice.content,
+            onDismiss = { editingNotice = null },
+            onConfirm = { title, content ->
+                viewModel.deleteAnnouncement(notice.id)
+                viewModel.addAnnouncement(title, content)
+                editingNotice = null
+            }
+        )
     }
 }
 
@@ -1514,91 +1688,162 @@ fun EventsTab(viewModel: MosqueViewModel) {
     val events by viewModel.events.collectAsState()
     val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
 
-    if (events.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No events scheduled.",
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-            )
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editingEvent by remember { mutableStateOf<EventEntity?>(null) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (isAdminLoggedIn) {
+            Button(
+                onClick = { showAddDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = TextLight)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Add New Event", fontWeight = FontWeight.Bold)
+                }
+            }
         }
-    } else {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(events) { event ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = event.title,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldGreen
-                            )
-                            if (isAdminLoggedIn) {
-                                IconButton(
-                                    onClick = { viewModel.deleteEvent(event.id) },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete",
-                                        tint = NoticeRed,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+
+        if (events.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(top = 32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No events scheduled.",
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(events) { event ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = event.title,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isAdminLoggedIn) {
+                                    Row {
+                                        IconButton(
+                                            onClick = { editingEvent = event },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = "Edit",
+                                                tint = EmeraldGreen,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        IconButton(
+                                            onClick = { viewModel.deleteEvent(event.id) },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Delete",
+                                                tint = NoticeRed,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                        }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                        Text(
-                            text = event.description,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            lineHeight = 18.sp,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
+                            Text(
+                                text = event.description,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                lineHeight = 18.sp,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Date: ${event.date}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+                                    Text(
+                                        text = "Time: ${event.time}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+                                }
                                 Text(
-                                    text = "Date: ${event.date}",
+                                    text = "Venue: ${event.location}",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                                Text(
-                                    text = "Time: ${event.time}",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    color = EmeraldGreen,
+                                    modifier = Modifier.align(Alignment.Bottom)
                                 )
                             }
-                            Text(
-                                text = "Venue: ${event.location}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldGreen,
-                                modifier = Modifier.align(Alignment.Bottom)
-                            )
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showAddDialog) {
+        EventDialog(
+            dialogTitle = "Add New Event",
+            initialTitle = "",
+            initialDescription = "",
+            initialDate = "Today",
+            initialTime = "05:00 PM",
+            initialLocation = "DUET Central Mosque",
+            onDismiss = { showAddDialog = false },
+            onConfirm = { title, desc, date, time, loc ->
+                viewModel.addEvent(title, desc, date, time, loc)
+                showAddDialog = false
+            }
+        )
+    }
+
+    editingEvent?.let { event ->
+        EventDialog(
+            dialogTitle = "Edit Event",
+            initialTitle = event.title,
+            initialDescription = event.description,
+            initialDate = event.date,
+            initialTime = event.time,
+            initialLocation = event.location,
+            onDismiss = { editingEvent = null },
+            onConfirm = { title, desc, date, time, loc ->
+                viewModel.deleteEvent(event.id)
+                viewModel.addEvent(title, desc, date, time, loc)
+                editingEvent = null
+            }
+        )
     }
 }
 
@@ -1607,172 +1852,275 @@ fun JanazaTab(viewModel: MosqueViewModel) {
     val janazas by viewModel.janazaNotices.collectAsState()
     val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
 
-    if (janazas.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No Janaza notices published.",
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-            )
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editingJanaza by remember { mutableStateOf<JanazaEntity?>(null) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (isAdminLoggedIn) {
+            Button(
+                onClick = { showAddDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = NoticeRed)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = TextLight)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Add Janaza Notice", fontWeight = FontWeight.Bold)
+                }
+            }
         }
-    } else {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(janazas) { janaza ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Janaza Notice: ${janaza.name}",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NoticeRed
-                            )
-                            if (isAdminLoggedIn) {
-                                IconButton(
-                                    onClick = { viewModel.deleteJanaza(janaza.id) },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete",
-                                        tint = NoticeRed,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+
+        if (janazas.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(top = 32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No Janaza notices published.",
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(janazas) { janaza ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Janaza Notice: ${janaza.name}",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NoticeRed,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isAdminLoggedIn) {
+                                    Row {
+                                        IconButton(
+                                            onClick = { editingJanaza = janaza },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = "Edit",
+                                                tint = EmeraldGreen,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        IconButton(
+                                            onClick = { viewModel.deleteJanaza(janaza.id) },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Delete",
+                                                tint = NoticeRed,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                        }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "Date: ${janaza.date}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                    Text(
+                                        text = "Time: ${janaza.time}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen
+                                    )
+                                }
                                 Text(
-                                    text = "Date: ${janaza.date}",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                )
-                                Text(
-                                    text = "Time: ${janaza.time}",
+                                    text = "Venue: ${janaza.location}",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = EmeraldGreen
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    modifier = Modifier.align(Alignment.Bottom)
                                 )
                             }
-                            Text(
-                                text = "Venue: ${janaza.location}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                modifier = Modifier.align(Alignment.Bottom)
-                            )
                         }
                     }
                 }
             }
         }
     }
+
+    if (showAddDialog) {
+        JanazaDialog(
+            dialogTitle = "Add Janaza Notice",
+            initialName = "",
+            initialDate = "Today",
+            initialTime = "02:00 PM",
+            initialLocation = "DUET Central Mosque Premises",
+            onDismiss = { showAddDialog = false },
+            onConfirm = { name, date, time, loc ->
+                viewModel.addJanaza(name, date, time, loc)
+                showAddDialog = false
+            }
+        )
+    }
+
+    editingJanaza?.let { janaza ->
+        JanazaDialog(
+            dialogTitle = "Edit Janaza Notice",
+            initialName = janaza.name,
+            initialDate = janaza.date,
+            initialTime = janaza.time,
+            initialLocation = janaza.location,
+            onDismiss = { editingJanaza = null },
+            onConfirm = { name, date, time, loc ->
+                viewModel.deleteJanaza(janaza.id)
+                viewModel.addJanaza(name, date, time, loc)
+                editingJanaza = null
+            }
+        )
+    }
 }
 
 @Composable
 fun EidTab(viewModel: MosqueViewModel) {
     val eid by viewModel.eidSchedule.collectAsState()
+    val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
 
-    if (eid == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No Eid schedule published.",
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-            )
+    var showEditDialog by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (isAdminLoggedIn) {
+            Button(
+                onClick = { showEditDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, tint = TextLight)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Edit Eid Schedule", fontWeight = FontWeight.Bold)
+                }
+            }
         }
-    } else {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            eid?.let { e ->
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Eid-ul-Fitr Schedule",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldGreen
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(GoldAccent.copy(alpha = 0.15f))
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text(text = "Eid Prayer Time", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
-                                    Text(text = e.prayerTime, fontSize = 20.sp, fontWeight = FontWeight.Black, color = EmeraldGreen)
-                                }
+        if (eid == null) {
+            Box(modifier = Modifier.fillMaxSize().padding(top = 32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No Eid schedule published.",
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                eid?.let { e ->
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
-                                    text = e.takbirReminder,
-                                    fontSize = 10.sp,
+                                    text = "Eid-ul-Fitr Schedule",
+                                    fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                    modifier = Modifier.weight(1f).padding(start = 16.dp),
-                                    textAlign = TextAlign.End
+                                    color = EmeraldGreen
                                 )
-                            }
+                                Spacer(modifier = Modifier.height(12.dp))
 
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Parking Info",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldGreen
-                            )
-                            Text(
-                                text = e.parkingInfo,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(GoldAccent.copy(alpha = 0.15f))
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(text = "Eid Prayer Time", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+                                        Text(text = e.prayerTime, fontSize = 20.sp, fontWeight = FontWeight.Black, color = EmeraldGreen)
+                                    }
+                                    Text(
+                                        text = e.takbirReminder,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                        modifier = Modifier.weight(1f).padding(start = 16.dp),
+                                        textAlign = TextAlign.End
+                                    )
+                                }
 
-                            if (e.specialNotice.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(12.dp))
                                 Text(
-                                    text = "Special Notice",
+                                    text = "Parking Info",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = NoticeRed
+                                    color = EmeraldGreen
                                 )
                                 Text(
-                                    text = e.specialNotice,
+                                    text = e.parkingInfo,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    modifier = Modifier.padding(bottom = 8.dp)
                                 )
+
+                                if (e.specialNotice.isNotEmpty()) {
+                                    Text(
+                                        text = "Special Notice",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = NoticeRed
+                                    )
+                                    Text(
+                                        text = e.specialNotice,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showEditDialog) {
+        EidDialog(
+            currentEid = eid,
+            onDismiss = { showEditDialog = false },
+            onConfirmEid = { prayer, takbir, parking, notice ->
+                viewModel.updateEidSchedule(prayer, takbir, parking, notice)
+                showEditDialog = false
+            }
+        )
     }
 }
 
@@ -1978,13 +2326,6 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
             }
         }
 
-        // Display Admin Tools if logged in
-        if (isAdminLoggedIn) {
-            item {
-                AdminPanelWidget(viewModel)
-            }
-        }
-
         // Mosque Info & Contact Imam Info Card
         item {
             Card(
@@ -2086,50 +2427,6 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
-                    }
-                }
-            }
-        }
-
-        // App System Info Card
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "System Information",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EmeraldGreen
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Application", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.6f))
-                        Text("DUET Mosque Connect v1.0", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Offline Database", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.6f))
-                        Text("Room Cache Active", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Qibla Sensor Status", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(0.6f))
-                        Text("Magnetometer Ready", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
                     }
                 }
             }
@@ -2453,6 +2750,94 @@ fun TimePickerClickableField(
 }
 
 @Composable
+fun DatePickerClickableField(
+    label: String,
+    value: String,
+    onDateSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    accentColor: Color = EmeraldGreen
+) {
+    val context = LocalContext.current
+
+    fun parseDateString(dateStr: String): Triple<Int, Int, Int> {
+        val cal = java.util.Calendar.getInstance()
+        return try {
+            val parser = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.US)
+            val date = parser.parse(dateStr)
+            if (date != null) {
+                cal.time = date
+            }
+            Triple(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH), cal.get(java.util.Calendar.DAY_OF_MONTH))
+        } catch (e: Exception) {
+            Triple(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH), cal.get(java.util.Calendar.DAY_OF_MONTH))
+        }
+    }
+
+    fun formatDateString(year: Int, month: Int, dayOfMonth: Int): String {
+        val cal = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.YEAR, year)
+            set(java.util.Calendar.MONTH, month)
+            set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
+        }
+        val formatter = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.US)
+        return formatter.format(cal.time)
+    }
+
+    fun launchPicker() {
+        val (year, month, day) = parseDateString(value)
+        android.app.DatePickerDialog(
+            context,
+            { _, selectedYear, selectedMonth, selectedDay ->
+                onDateSelected(formatDateString(selectedYear, selectedMonth, selectedDay))
+            },
+            year,
+            month,
+            day
+        ).show()
+    }
+
+    OutlinedCard(
+        onClick = { launchPicker() },
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.outlinedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = label,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = if (value.isNotBlank()) value else "Select Date",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.Event,
+                contentDescription = "Pick Date",
+                tint = accentColor,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
 fun SettingToggleRow(
     title: String,
     description: String,
@@ -2519,361 +2904,363 @@ fun SecurityFeatureItem(title: String, description: String) {
     }
 }
 
-// 6. ADMIN TOOLS PANEL
+// 6. UPDATE DIALOGS FOR IMAM EDIT & ADD
 @Composable
-fun AdminPanelWidget(viewModel: MosqueViewModel) {
-    var selectedTool by remember { mutableIntStateOf(0) }
-    val tools = listOf("Add Notice", "Add Event", "Janaza", "Ramadan/Eid Settings")
+fun AnnouncementDialog(
+    dialogTitle: String,
+    initialTitle: String,
+    initialContent: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String) -> Unit
+) {
+    var titleInput by remember { mutableStateOf(initialTitle) }
+    var contentInput by remember { mutableStateOf(initialContent) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, GoldAccent.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "Imam Database Controls",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = EmeraldGreen
-        )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(dialogTitle, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = titleInput,
+                    onValueChange = { titleInput = it },
+                    label = { Text("Notice Title") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = contentInput,
+                    onValueChange = { contentInput = it },
+                    label = { Text("Message Content") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (titleInput.isNotBlank() && contentInput.isNotBlank()) {
+                        onConfirm(titleInput, contentInput)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = EmeraldGreen)
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
 
-        Spacer(modifier = Modifier.height(10.dp))
+@Composable
+fun EventDialog(
+    dialogTitle: String,
+    initialTitle: String,
+    initialDescription: String,
+    initialDate: String,
+    initialTime: String,
+    initialLocation: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String, String, String, String) -> Unit
+) {
+    val todayFormatted = remember {
+        val formatter = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.US)
+        formatter.format(java.util.Date())
+    }
+    var titleInput by remember { mutableStateOf(initialTitle) }
+    var descInput by remember { mutableStateOf(initialDescription) }
+    var dateInput by remember { mutableStateOf(if (initialDate.isBlank() || initialDate.equals("Today", ignoreCase = true)) todayFormatted else initialDate) }
+    var timeInput by remember { mutableStateOf(initialTime) }
+    var locationInput by remember { mutableStateOf(initialLocation) }
 
-        // Tool selector pills
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            tools.forEachIndexed { index, name ->
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (selectedTool == index) EmeraldGreen else MaterialTheme.colorScheme.background
-                        )
-                        .clickable { selectedTool = index }
-                        .padding(vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = name.substringBefore(" "),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (selectedTool == index) TextLight else MaterialTheme.colorScheme.onSurface
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(dialogTitle, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = titleInput,
+                    onValueChange = { titleInput = it },
+                    label = { Text("Event Title") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = descInput,
+                    onValueChange = { descInput = it },
+                    label = { Text("Description") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
+                    maxLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DatePickerClickableField(
+                        label = "Date",
+                        value = dateInput,
+                        onDateSelected = { dateInput = it },
+                        modifier = Modifier.weight(1f),
+                        accentColor = EmeraldGreen
+                    )
+                    TimePickerClickableField(
+                        label = "Event Time",
+                        value = if (timeInput.isBlank()) "05:00 PM" else timeInput,
+                        onTimeSelected = { timeInput = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                OutlinedTextField(
+                    value = locationInput,
+                    onValueChange = { locationInput = it },
+                    label = { Text("Venue / Location") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (titleInput.isNotBlank() && descInput.isNotBlank()) {
+                        onConfirm(titleInput, descInput, dateInput, timeInput, locationInput)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = EmeraldGreen)
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+@Composable
+fun JanazaDialog(
+    dialogTitle: String,
+    initialName: String,
+    initialDate: String,
+    initialTime: String,
+    initialLocation: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String, String, String) -> Unit
+) {
+    val todayFormatted = remember {
+        val formatter = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.US)
+        formatter.format(java.util.Date())
+    }
+    var nameInput by remember { mutableStateOf(initialName) }
+    var dateInput by remember { mutableStateOf(if (initialDate.isBlank() || initialDate.equals("Today", ignoreCase = true)) todayFormatted else initialDate) }
+    var timeInput by remember { mutableStateOf(initialTime) }
+    var locationInput by remember { mutableStateOf(initialLocation) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(dialogTitle, fontWeight = FontWeight.Bold, color = NoticeRed)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Name of Deceased") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NoticeRed, focusedLabelColor = NoticeRed),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DatePickerClickableField(
+                        label = "Date",
+                        value = dateInput,
+                        onDateSelected = { dateInput = it },
+                        modifier = Modifier.weight(1f),
+                        accentColor = NoticeRed
+                    )
+                    TimePickerClickableField(
+                        label = "Janaza Time",
+                        value = if (timeInput.isBlank()) "02:00 PM" else timeInput,
+                        onTimeSelected = { timeInput = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                OutlinedTextField(
+                    value = locationInput,
+                    onValueChange = { locationInput = it },
+                    label = { Text("Janaza Location") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NoticeRed, focusedLabelColor = NoticeRed),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (nameInput.isNotBlank()) {
+                        onConfirm(nameInput, dateInput, timeInput, locationInput)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = NoticeRed)
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = NoticeRed)
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+@Composable
+fun EidDialog(
+    currentEid: EidEntity?,
+    onDismiss: () -> Unit,
+    onConfirmEid: (String, String, String, String) -> Unit
+) {
+    var prayerInput by remember { mutableStateOf(currentEid?.prayerTime ?: "07:30 AM") }
+    var takbirInput by remember { mutableStateOf(currentEid?.takbirReminder ?: "Takbir begins at 07:15 AM") }
+    var parkingInput by remember { mutableStateOf(currentEid?.parkingInfo ?: "Parking near central playground") }
+    var noticeInput by remember { mutableStateOf(currentEid?.specialNotice ?: "Bring your own prayer mat.") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Edit Eid Schedule", fontWeight = FontWeight.Bold, color = EmeraldGreen)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TimePickerClickableField(
+                    label = "Eid Prayer Time",
+                    value = prayerInput,
+                    onTimeSelected = { prayerInput = it }
+                )
+                OutlinedTextField(
+                    value = takbirInput,
+                    onValueChange = { takbirInput = it },
+                    label = { Text("Takbir Notification") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = parkingInput,
+                    onValueChange = { parkingInput = it },
+                    label = { Text("Parking Info") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = noticeInput,
+                    onValueChange = { noticeInput = it },
+                    label = { Text("Special Notice") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirmEid(prayerInput, takbirInput, parkingInput, noticeInput)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = EmeraldGreen)
+            }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+@Composable
+fun FastingSolarDialog(
+    currentRamadan: RamadanEntity?,
+    onDismiss: () -> Unit,
+    onConfirmRamadan: (String, String, String, String) -> Unit
+) {
+    var sehriInput by remember { mutableStateOf(currentRamadan?.sehriTime ?: "04:30 AM") }
+    var iftarInput by remember { mutableStateOf(currentRamadan?.iftarTime ?: "06:45 PM") }
+    var sunriseInput by remember { mutableStateOf(currentRamadan?.sunriseTime ?: "05:24 AM") }
+    var sunsetInput by remember { mutableStateOf(currentRamadan?.sunsetTime ?: "06:46 PM") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Edit Fasting & Solar Limits", fontWeight = FontWeight.Bold, color = EmeraldGreen)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TimePickerClickableField(
+                    label = "Sehri Time",
+                    value = sehriInput,
+                    onTimeSelected = { sehriInput = it }
+                )
+                TimePickerClickableField(
+                    label = "Iftar Time",
+                    value = iftarInput,
+                    onTimeSelected = { iftarInput = it }
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TimePickerClickableField(
+                        label = "Sunrise",
+                        value = sunriseInput,
+                        onTimeSelected = { sunriseInput = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                    TimePickerClickableField(
+                        label = "Sunset",
+                        value = sunsetInput,
+                        onTimeSelected = { sunsetInput = it },
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Selected tools forms
-        when (selectedTool) {
-            0 -> AnnouncementForm(viewModel)
-            1 -> EventForm(viewModel)
-            2 -> JanazaForm(viewModel)
-            3 -> RamadanEidForm(viewModel)
-        }
-    }
-}
-
-@Composable
-fun AnnouncementForm(viewModel: MosqueViewModel) {
-    var title by remember { mutableStateOf("") }
-    var content by remember { mutableStateOf("") }
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedTextField(
-            value = title,
-            onValueChange = { title = it },
-            label = { Text("Notice Title") },
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = content,
-            onValueChange = { content = it },
-            label = { Text("Message Content") },
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-            maxLines = 4,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Button(
-            onClick = {
-                if (title.isNotEmpty() && content.isNotEmpty()) {
-                    viewModel.addAnnouncement(title, content)
-                    title = ""
-                    content = ""
-                }
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Publish & Send Notification")
-        }
-    }
-}
-
-@Composable
-fun EventForm(viewModel: MosqueViewModel) {
-    var title by remember { mutableStateOf("") }
-    var desc by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf("") }
-    var time by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedTextField(
-            value = title,
-            onValueChange = { title = it },
-            label = { Text("Event Title") },
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = desc,
-            onValueChange = { desc = it },
-            label = { Text("Description") },
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-            maxLines = 2,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = date,
-                onValueChange = { date = it },
-                label = { Text("Date") },
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            TimePickerClickableField(
-                label = "Event Time",
-                value = if (time.isBlank()) "05:00 PM" else time,
-                onTimeSelected = { time = it },
-                modifier = Modifier.weight(1f)
-            )
-        }
-        OutlinedTextField(
-            value = location,
-            onValueChange = { location = it },
-            label = { Text("Venue / Location") },
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Button(
-            onClick = {
-                if (title.isNotEmpty() && desc.isNotEmpty()) {
-                    viewModel.addEvent(title, desc, date, time, location)
-                    title = ""
-                    desc = ""
-                    date = ""
-                    time = ""
-                    location = ""
-                }
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Publish Islamic Event")
-        }
-    }
-}
-
-@Composable
-fun JanazaForm(viewModel: MosqueViewModel) {
-    var deceasedName by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf("") }
-    var time by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedTextField(
-            value = deceasedName,
-            onValueChange = { deceasedName = it },
-            label = { Text("Name of Deceased") },
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = date,
-                onValueChange = { date = it },
-                label = { Text("Date") },
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            TimePickerClickableField(
-                label = "Janaza Time",
-                value = if (time.isBlank()) "02:00 PM" else time,
-                onTimeSelected = { time = it },
-                modifier = Modifier.weight(1f)
-            )
-        }
-        OutlinedTextField(
-            value = location,
-            onValueChange = { location = it },
-            label = { Text("Janaza Location") },
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Button(
-            onClick = {
-                if (deceasedName.isNotEmpty()) {
-                    viewModel.addJanaza(deceasedName, date, time, location)
-                    deceasedName = ""
-                    date = ""
-                    time = ""
-                    location = ""
-                }
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null)
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Publish Janaza notice")
-        }
-    }
-}
-
-@Composable
-fun RamadanEidForm(viewModel: MosqueViewModel) {
-    var isRamadanEdit by remember { mutableStateOf(true) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isRamadanEdit) GoldAccent else MaterialTheme.colorScheme.background)
-                    .clickable { isRamadanEdit = true }
-                    .padding(vertical = 6.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Ramadan Config", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isRamadanEdit) EmeraldGreenDark else MaterialTheme.colorScheme.onSurface)
-            }
-            Spacer(modifier = Modifier.width(6.dp))
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (!isRamadanEdit) GoldAccent else MaterialTheme.colorScheme.background)
-                    .clickable { isRamadanEdit = false }
-                    .padding(vertical = 6.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Eid Config", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (!isRamadanEdit) EmeraldGreenDark else MaterialTheme.colorScheme.onSurface)
-            }
-        }
-
-        if (isRamadanEdit) {
-            var sehri by remember { mutableStateOf("04:30 AM") }
-            var iftar by remember { mutableStateOf("06:45 PM") }
-            var sunrise by remember { mutableStateOf("05:24 AM") }
-            var sunset by remember { mutableStateOf("06:46 PM") }
-            var taraweeh by remember { mutableStateOf("09:00 PM") }
-            var notes by remember { mutableStateOf("Current Fasting & Solar Limits for DUET Central Mosque") }
-
-            TimePickerClickableField(
-                label = "Sehri Time",
-                value = sehri,
-                onTimeSelected = { sehri = it }
-            )
-            TimePickerClickableField(
-                label = "Iftar Time",
-                value = iftar,
-                onTimeSelected = { iftar = it }
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TimePickerClickableField(
-                    label = "Sunrise",
-                    value = sunrise,
-                    onTimeSelected = { sunrise = it },
-                    modifier = Modifier.weight(1f)
-                )
-                TimePickerClickableField(
-                    label = "Sunset",
-                    value = sunset,
-                    onTimeSelected = { sunset = it },
-                    modifier = Modifier.weight(1f)
-                )
-            }
+        },
+        confirmButton = {
             Button(
                 onClick = {
-                    viewModel.updateRamadanSchedule(sehri, iftar, taraweeh, notes, sunrise, sunset)
+                    onConfirmRamadan(sehriInput, iftarInput, sunriseInput, sunsetInput)
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
             ) {
-                Text("Save Fasting & Solar Config")
+                Text("Save")
             }
-        } else {
-            var prayer by remember { mutableStateOf("07:30 AM") }
-            var takbir by remember { mutableStateOf("Takbir begins at 07:15 AM") }
-            var parking by remember { mutableStateOf("Parking near central playground") }
-            var notice by remember { mutableStateOf("Bring your own prayer mat.") }
-
-            TimePickerClickableField(
-                label = "Eid Prayer Time",
-                value = prayer,
-                onTimeSelected = { prayer = it }
-            )
-            OutlinedTextField(
-                value = takbir,
-                onValueChange = { takbir = it },
-                label = { Text("Takbir Notification") },
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = parking,
-                onValueChange = { parking = it },
-                label = { Text("Parking Info") },
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = notice,
-                onValueChange = { notice = it },
-                label = { Text("Special Notices") },
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmeraldGreen, focusedLabelColor = EmeraldGreen),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Button(
-                onClick = {
-                    viewModel.updateEidSchedule(prayer, takbir, parking, notice)
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Save Eid Config")
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = EmeraldGreen)
             }
-        }
-    }
+        },
+        shape = RoundedCornerShape(20.dp)
+    )
 }
 
 

@@ -20,7 +20,7 @@ import com.duet.mosque.connect.data.model.RamadanEntity
         RamadanEntity::class,
         EidEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -43,8 +43,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "duet_mosque_connect_db"
                 )
-                .fallbackToDestructiveMigration(true)
-                .build()
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

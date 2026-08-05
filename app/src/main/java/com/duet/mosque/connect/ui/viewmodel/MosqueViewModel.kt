@@ -202,9 +202,9 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // Database Actions (Imam/Admin only)
-    fun updatePrayerTime(id: String, name: String, startTime: String, jamatTime: String) {
+    fun updatePrayerTime(id: String, name: String, azanTime: String, jamatTime: String) {
         viewModelScope.launch {
-            repository.updatePrayerTime(id, name, startTime, jamatTime)
+            repository.updatePrayerTime(id, name, azanTime, jamatTime)
             // Trigger automatic countdown re-calc
             calculateNextJamat(prayerTimes.value)
         }
