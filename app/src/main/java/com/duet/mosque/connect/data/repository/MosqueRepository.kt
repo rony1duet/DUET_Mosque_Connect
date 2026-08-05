@@ -1,6 +1,7 @@
 package com.duet.mosque.connect.data.repository
 
 import android.content.Context
+import android.util.Log
 import com.duet.mosque.connect.data.database.AppDatabase
 import com.duet.mosque.connect.data.model.AnnouncementEntity
 import com.duet.mosque.connect.data.model.EidEntity
@@ -8,21 +9,20 @@ import com.duet.mosque.connect.data.model.EventEntity
 import com.duet.mosque.connect.data.model.JanazaEntity
 import com.duet.mosque.connect.data.model.PrayerTimeEntity
 import com.duet.mosque.connect.data.model.RamadanEntity
-import com.google.firebase.database.DataSnapshot
-import com.google.firebase.database.DatabaseError
-import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.database.ValueEventListener
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentChange
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
 class MosqueRepository(private val context: Context) {
 
     private val database = AppDatabase.getDatabase(context)
-    private val firebaseDatabase = FirebaseDatabase.getInstance()
-    private val scope = CoroutineScope(Dispatchers.IO)
     private val prayerTimeDao = database.prayerTimeDao()
     private val announcementDao = database.announcementDao()
     private val eventDao = database.eventDao()
@@ -30,7 +30,37 @@ class MosqueRepository(private val context: Context) {
     private val ramadanDao = database.ramadanDao()
     private val eidDao = database.eidDao()
 
-    // Flow getters
+    private val repositoryScope = CoroutineScope(Dispatchers.IO)
+    private var firestore: FirebaseFirestore? = null
+
+    init {
+        try {
+            FirebaseApp.initializeApp(context)
+            firestore = FirebaseFirestore.getInstance()
+            try {
+                val auth = FirebaseAuth.getInstance()
+                if (auth.currentUser == null) {
+                    auth.signInAnonymously().addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            Log.d("MosqueRepository", "Anonymous Firebase Auth successful")
+                        } else {
+                            Log.w("MosqueRepository", "Anonymous Firebase Auth skipped/failed: ${task.exception?.message}")
+                        }
+                        setupRealtimeListeners()
+                    }
+                } else {
+                    setupRealtimeListeners()
+                }
+            } catch (authEx: Exception) {
+                Log.w("MosqueRepository", "Firebase Auth init skipped: ${authEx.message}")
+                setupRealtimeListeners()
+            }
+        } catch (e: Exception) {
+            Log.e("MosqueRepository", "Firebase Firestore initialization error: ${e.message}")
+        }
+    }
+
+    // Flow getters (Room database serves as local offline cache)
     val allPrayerTimes: Flow<List<PrayerTimeEntity>> = prayerTimeDao.getAllPrayerTimes()
     val allAnnouncements: Flow<List<AnnouncementEntity>> = announcementDao.getAllAnnouncements()
     val allEvents: Flow<List<EventEntity>> = eventDao.getAllEvents()
@@ -38,195 +68,276 @@ class MosqueRepository(private val context: Context) {
     val ramadanSchedule: Flow<RamadanEntity?> = ramadanDao.getRamadanSchedule()
     val eidSchedule: Flow<EidEntity?> = eidDao.getEidSchedule()
 
-    fun syncWithFirebase() {
-        // Sync Prayer Times
-        firebaseDatabase.getReference("prayer_times").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val prayers = mutableListOf<PrayerTimeEntity>()
-                snapshot.children.forEach { child ->
-                    child.getValue(PrayerTimeEntity::class.java)?.let { prayers.add(it) }
-                }
-                if (prayers.isNotEmpty()) {
-                    scope.launch { prayerTimeDao.insertPrayerTimes(prayers) }
-                }
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+    private fun setupRealtimeListeners() {
+        val fs = firestore ?: return
 
-        // Sync Announcements
-        firebaseDatabase.getReference("announcements").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val announcements = mutableListOf<AnnouncementEntity>()
-                snapshot.children.forEach { child ->
-                    child.getValue(AnnouncementEntity::class.java)?.let { announcements.add(it) }
+        // 1. Realtime Listener for Prayer Times
+        try {
+            fs.collection("prayer_times").addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                        Log.w("MosqueRepository", "Firestore prayer_times permission denied. Using local Room cache.")
+                    } else {
+                        Log.w("MosqueRepository", "Listening to prayer_times status: ${error.message}")
+                    }
+                    return@addSnapshotListener
                 }
-                scope.launch {
-                    // Simple sync: clear and re-insert or diff. For simplicity, we'll replace all for now
-                    // In a production app, we might want a more sophisticated sync.
-                    announcementDao.insertAnnouncements(announcements)
+                if (snapshot != null && !snapshot.isEmpty) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        val name = doc.getString("name") ?: ""
+                        val azan = doc.getString("azanTime") ?: ""
+                        val jamat = doc.getString("jamatTime") ?: ""
+                        PrayerTimeEntity(id = doc.id, name = name, azanTime = azan, jamatTime = jamat)
+                    }
+                    repositoryScope.launch {
+                        prayerTimeDao.insertPrayerTimes(list)
+                    }
                 }
             }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+        } catch (e: Exception) {
+            Log.e("MosqueRepository", "Prayer times listener failed: ${e.message}")
+        }
 
-        // Sync Events
-        firebaseDatabase.getReference("events").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val events = mutableListOf<EventEntity>()
-                snapshot.children.forEach { child ->
-                    child.getValue(EventEntity::class.java)?.let { events.add(it) }
+        // 2. Realtime Listener for Announcements
+        try {
+            fs.collection("announcements").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                repositoryScope.launch {
+                    for (dc in snapshot.documentChanges) {
+                        when (dc.type) {
+                            DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> {
+                                val doc = dc.document
+                                val title = doc.getString("title") ?: continue
+                                val content = doc.getString("content") ?: ""
+                                val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                                announcementDao.insertAnnouncement(AnnouncementEntity(id = doc.id, title = title, content = content, timestamp = ts))
+                            }
+                            DocumentChange.Type.REMOVED -> {
+                                announcementDao.deleteAnnouncementById(dc.document.id)
+                            }
+                        }
+                    }
                 }
-                scope.launch { eventDao.insertEvents(events) }
             }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+        } catch (e: Exception) {
+            Log.e("MosqueRepository", "Announcements listener failed: ${e.message}")
+        }
 
-        // Sync Janaza
-        firebaseDatabase.getReference("janaza").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val janazas = mutableListOf<JanazaEntity>()
-                snapshot.children.forEach { child ->
-                    child.getValue(JanazaEntity::class.java)?.let { janazas.add(it) }
+        // 3. Realtime Listener for Islamic Events
+        try {
+            fs.collection("events").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                repositoryScope.launch {
+                    for (dc in snapshot.documentChanges) {
+                        when (dc.type) {
+                            DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> {
+                                val doc = dc.document
+                                val title = doc.getString("title") ?: continue
+                                val desc = doc.getString("description") ?: ""
+                                val date = doc.getString("date") ?: ""
+                                val time = doc.getString("time") ?: ""
+                                val loc = doc.getString("location") ?: ""
+                                val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                                eventDao.insertEvent(EventEntity(id = doc.id, title = title, description = desc, date = date, time = time, location = loc, timestamp = ts))
+                            }
+                            DocumentChange.Type.REMOVED -> {
+                                eventDao.deleteEventById(dc.document.id)
+                            }
+                        }
+                    }
                 }
-                scope.launch { janazaDao.insertJanazas(janazas) }
             }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+        } catch (e: Exception) {
+            Log.e("MosqueRepository", "Events listener failed: ${e.message}")
+        }
 
-        // Sync Ramadan
-        firebaseDatabase.getReference("ramadan").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.getValue(RamadanEntity::class.java)?.let {
-                    scope.launch { ramadanDao.insertRamadanSchedule(it) }
+        // 4. Realtime Listener for Janaza Notices
+        try {
+            fs.collection("janaza").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                repositoryScope.launch {
+                    for (dc in snapshot.documentChanges) {
+                        when (dc.type) {
+                            DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> {
+                                val doc = dc.document
+                                val name = doc.getString("name") ?: continue
+                                val date = doc.getString("date") ?: ""
+                                val time = doc.getString("time") ?: ""
+                                val loc = doc.getString("location") ?: ""
+                                val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                                janazaDao.insertJanaza(JanazaEntity(id = doc.id, name = name, date = date, time = time, location = loc, timestamp = ts))
+                            }
+                            DocumentChange.Type.REMOVED -> {
+                                janazaDao.deleteJanazaById(dc.document.id)
+                            }
+                        }
+                    }
                 }
             }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+        } catch (e: Exception) {
+            Log.e("MosqueRepository", "Janaza listener failed: ${e.message}")
+        }
 
-        // Sync Eid
-        firebaseDatabase.getReference("eid").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.getValue(EidEntity::class.java)?.let {
-                    scope.launch { eidDao.insertEidSchedule(it) }
+        // 5. Realtime Listener for Ramadan/Solar Limits
+        try {
+            fs.collection("ramadan").document("main").addSnapshotListener { doc, error ->
+                if (error != null || doc == null || !doc.exists()) return@addSnapshotListener
+                val sehri = doc.getString("sehriTime") ?: "04:30 AM"
+                val iftar = doc.getString("iftarTime") ?: "06:45 PM"
+                val taraweeh = doc.getString("taraweehTime") ?: "09:00 PM"
+                val sunrise = doc.getString("sunriseTime") ?: "05:24 AM"
+                val sunset = doc.getString("sunsetTime") ?: "06:46 PM"
+                val notes = doc.getString("notes") ?: "Current Fasting & Solar Limits for DUET Central Mosque."
+                repositoryScope.launch {
+                    ramadanDao.insertRamadanSchedule(
+                        RamadanEntity(
+                            id = 1,
+                            sehriTime = sehri,
+                            iftarTime = iftar,
+                            taraweehTime = taraweeh,
+                            sunriseTime = sunrise,
+                            sunsetTime = sunset,
+                            notes = notes
+                        )
+                    )
                 }
             }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+        } catch (e: Exception) {
+            Log.e("MosqueRepository", "Ramadan listener failed: ${e.message}")
+        }
+
+        // 6. Realtime Listener for Eid Schedule
+        try {
+            fs.collection("eid").document("main").addSnapshotListener { doc, error ->
+                if (error != null || doc == null || !doc.exists()) return@addSnapshotListener
+                val prayerTime = doc.getString("prayerTime") ?: "07:30 AM"
+                val takbir = doc.getString("takbirReminder") ?: "Takbir recitations begin at 07:15 AM"
+                val parking = doc.getString("parkingInfo") ?: ""
+                val notice = doc.getString("specialNotice") ?: ""
+                repositoryScope.launch {
+                    eidDao.insertEidSchedule(
+                        EidEntity(
+                            id = 1,
+                            prayerTime = prayerTime,
+                            takbirReminder = takbir,
+                            parkingInfo = parking,
+                            specialNotice = notice
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MosqueRepository", "Eid listener failed: ${e.message}")
+        }
     }
 
-    // Suspending seeding method
-    suspend fun checkAndSeedDatabase() {
-        // Seed or update Prayer Times with exact specified DUET Mosque schedule
-        val defaultPrayers = listOf(
-            PrayerTimeEntity("fajr", "Fajr", "04:35 AM", "04:55 AM"),
-            PrayerTimeEntity("zuhr", "Dhuhr", "12:05 PM", "01:20 PM"),
-            PrayerTimeEntity("asr", "Asr", "04:30 PM", "05:15 PM"),
-            PrayerTimeEntity("maghrib", "Maghrib", "06:56 PM", "06:56 PM"),
-            PrayerTimeEntity("isha", "Isha", "08:30 PM", "09:00 PM"),
-            PrayerTimeEntity("jummah", "Jumma", "12:05 PM", "01:30 PM")
-        )
-        prayerTimeDao.insertPrayerTimes(defaultPrayers)
-
-        // Seed Fasting & Solar Limits
-        ramadanDao.insertRamadanSchedule(
-            RamadanEntity(
-                sehriTime = "04:30 AM",
-                iftarTime = "06:45 PM",
-                taraweehTime = "09:00 PM",
-                sunriseTime = "05:24 AM",
-                sunsetTime = "06:46 PM",
-                notes = "Current Fasting & Solar Limits for DUET Central Mosque."
-            )
-        )
-
-        val existingAnnouncements = allAnnouncements.firstOrNull()
-        if (existingAnnouncements.isNullOrEmpty()) {
-            // Seed Announcement
-            announcementDao.insertAnnouncement(
-                AnnouncementEntity(
-                    title = "Central Mosque Digital Platform Launched",
-                    content = "Assalamu Alaikum. Welcome to the official DUET Mosque Connect platform. Daily prayers, Azan times, and Jamat time updates will be synchronized here directly by the Imam."
-                )
-            )
-
-            // Seed Event
-            eventDao.insertEvent(
-                EventEntity(
-                    title = "Weekly Quran Tafseer Session",
-                    description = "Join us for our weekly Tafseer-ul-Quran lecture focusing on lessons for students.",
-                    date = "Every Thursday",
-                    time = "After Isha Prayer",
-                    location = "DUET Central Mosque Main Hall"
-                )
-            )
-
-            // Seed Eid
-            eidDao.insertEidSchedule(
-                EidEntity(
-                    prayerTime = "07:30 AM",
-                    takbirReminder = "Takbir recitations begin at 07:15 AM",
-                    parkingInfo = "Student parking at DUET Central Playground. Teacher parking near Administrative building.",
-                    specialNotice = "Bring your own prayer mat."
-                )
-            )
-        }
+    fun checkAndSeedDatabase() {
+        // Seeding logic removed to ensure fresh start without dummy data.
     }
 
     // Update Prayer Times
     suspend fun updatePrayerTime(id: String, name: String, azanTime: String, jamat: String) {
-        val prayer = PrayerTimeEntity(id, name, azanTime, jamat)
-        prayerTimeDao.updatePrayerTime(prayer)
-        firebaseDatabase.getReference("prayer_times").child(id).setValue(prayer)
+        val entity = PrayerTimeEntity(id, name, azanTime, jamat)
+        prayerTimeDao.updatePrayerTime(entity)
+        firestore?.let { fs ->
+            try {
+                val map = mapOf("name" to name, "azanTime" to azanTime, "jamatTime" to jamat)
+                fs.collection("prayer_times").document(id).set(map, SetOptions.merge())
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore updatePrayerTime failed: ${e.message}")
+            }
+        }
     }
 
     // Add Announcement
     suspend fun addAnnouncement(title: String, content: String) {
-        val announcement = AnnouncementEntity(title = title, content = content)
-        announcementDao.insertAnnouncement(announcement)
-        firebaseDatabase.getReference("announcements").child(announcement.id).setValue(announcement)
+        val entity = AnnouncementEntity(title = title, content = content)
+        announcementDao.insertAnnouncement(entity)
+        firestore?.let { fs ->
+            try {
+                val map = mapOf("title" to title, "content" to content, "timestamp" to entity.timestamp)
+                fs.collection("announcements").document(entity.id).set(map)
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore addAnnouncement failed: ${e.message}")
+            }
+        }
     }
 
     // Delete Announcement
     suspend fun deleteAnnouncementById(id: String) {
         announcementDao.deleteAnnouncementById(id)
-        firebaseDatabase.getReference("announcements").child(id).removeValue()
+        firestore?.let { fs ->
+            try {
+                fs.collection("announcements").document(id).delete()
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore deleteAnnouncement failed: ${e.message}")
+            }
+        }
     }
 
     // Add Event
     suspend fun addEvent(title: String, description: String, date: String, time: String, location: String) {
-        val event = EventEntity(
-            title = title,
-            description = description,
-            date = date,
-            time = time,
-            location = location
-        )
-        eventDao.insertEvent(event)
-        firebaseDatabase.getReference("events").child(event.id).setValue(event)
+        val entity = EventEntity(title = title, description = description, date = date, time = time, location = location)
+        eventDao.insertEvent(entity)
+        firestore?.let { fs ->
+            try {
+                val map = mapOf(
+                    "title" to title,
+                    "description" to description,
+                    "date" to date,
+                    "time" to time,
+                    "location" to location,
+                    "timestamp" to entity.timestamp
+                )
+                fs.collection("events").document(entity.id).set(map)
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore addEvent failed: ${e.message}")
+            }
+        }
     }
 
     // Delete Event
     suspend fun deleteEventById(id: String) {
         eventDao.deleteEventById(id)
-        firebaseDatabase.getReference("events").child(id).removeValue()
+        firestore?.let { fs ->
+            try {
+                fs.collection("events").document(id).delete()
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore deleteEvent failed: ${e.message}")
+            }
+        }
     }
 
     // Add Janaza
     suspend fun addJanaza(name: String, date: String, time: String, location: String) {
-        val janaza = JanazaEntity(
-            name = name,
-            date = date,
-            time = time,
-            location = location
-        )
-        janazaDao.insertJanaza(janaza)
-        firebaseDatabase.getReference("janaza").child(janaza.id).setValue(janaza)
+        val entity = JanazaEntity(name = name, date = date, time = time, location = location)
+        janazaDao.insertJanaza(entity)
+        firestore?.let { fs ->
+            try {
+                val map = mapOf(
+                    "name" to name,
+                    "date" to date,
+                    "time" to time,
+                    "location" to location,
+                    "timestamp" to entity.timestamp
+                )
+                fs.collection("janaza").document(entity.id).set(map)
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore addJanaza failed: ${e.message}")
+            }
+        }
     }
 
     // Delete Janaza
     suspend fun deleteJanazaById(id: String) {
         janazaDao.deleteJanazaById(id)
-        firebaseDatabase.getReference("janaza").child(id).removeValue()
+        firestore?.let { fs ->
+            try {
+                fs.collection("janaza").document(id).delete()
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore deleteJanaza failed: ${e.message}")
+            }
+        }
     }
 
     // Update Ramadan & Fasting/Solar Limits
@@ -238,7 +349,8 @@ class MosqueRepository(private val context: Context) {
         sunrise: String = "5:24 AM",
         sunset: String = "6:46 PM"
     ) {
-        val ramadan = RamadanEntity(
+        val entity = RamadanEntity(
+            id = 1,
             sehriTime = sehri,
             iftarTime = iftar,
             taraweehTime = taraweeh,
@@ -246,19 +358,46 @@ class MosqueRepository(private val context: Context) {
             sunsetTime = sunset,
             notes = notes
         )
-        ramadanDao.insertRamadanSchedule(ramadan)
-        firebaseDatabase.getReference("ramadan").setValue(ramadan)
+        ramadanDao.insertRamadanSchedule(entity)
+        firestore?.let { fs ->
+            try {
+                val map = mapOf(
+                    "sehriTime" to sehri,
+                    "iftarTime" to iftar,
+                    "taraweehTime" to taraweeh,
+                    "sunriseTime" to sunrise,
+                    "sunsetTime" to sunset,
+                    "notes" to notes
+                )
+                fs.collection("ramadan").document("main").set(map, SetOptions.merge())
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore updateRamadanSchedule failed: ${e.message}")
+            }
+        }
     }
 
     // Update Eid
     suspend fun updateEidSchedule(prayer: String, takbir: String, parking: String, notice: String) {
-        val eid = EidEntity(
+        val entity = EidEntity(
+            id = 1,
             prayerTime = prayer,
             takbirReminder = takbir,
             parkingInfo = parking,
             specialNotice = notice
         )
-        eidDao.insertEidSchedule(eid)
-        firebaseDatabase.getReference("eid").setValue(eid)
+        eidDao.insertEidSchedule(entity)
+        firestore?.let { fs ->
+            try {
+                val map = mapOf(
+                    "prayerTime" to prayer,
+                    "takbirReminder" to takbir,
+                    "parkingInfo" to parking,
+                    "specialNotice" to notice
+                )
+                fs.collection("eid").document("main").set(map, SetOptions.merge())
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Firestore updateEidSchedule failed: ${e.message}")
+            }
+        }
     }
 }

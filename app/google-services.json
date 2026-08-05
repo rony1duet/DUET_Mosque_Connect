@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "1046003110349",
+    "firebase_url": "https://duet-mosque-connect-app-default-rtdb.asia-southeast1.firebasedatabase.app",
     "project_id": "duet-mosque-connect-app",
     "storage_bucket": "duet-mosque-connect-app.firebasestorage.app"
   },

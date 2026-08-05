@@ -34,9 +34,6 @@ interface AnnouncementDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAnnouncement(announcement: AnnouncementEntity)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAnnouncements(announcements: List<AnnouncementEntity>)
-
     @Delete
     suspend fun deleteAnnouncement(announcement: AnnouncementEntity)
 
@@ -52,9 +49,6 @@ interface EventDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvent(event: EventEntity)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertEvents(events: List<EventEntity>)
-
     @Delete
     suspend fun deleteEvent(event: EventEntity)
 
@@ -69,9 +63,6 @@ interface JanazaDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertJanaza(janaza: JanazaEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertJanazas(janazas: List<JanazaEntity>)
 
     @Delete
     suspend fun deleteJanaza(janaza: JanazaEntity)

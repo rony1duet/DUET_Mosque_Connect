@@ -85,7 +85,7 @@ class CompassSensorManager(context: Context) : SensorEventListener {
         if (lastAccelerometerSet && lastMagnetometerSet) {
             if (SensorManager.getRotationMatrix(rotationMatrix, null, lastAccelerometer, lastMagnetometer)) {
                 SensorManager.getOrientation(rotationMatrix, orientationAngles)
-                
+
                 // Convert azimuth from radians to degrees
                 // azimuth is orientationAngles[0], ranging from -PI to PI
                 var azimuthDegrees = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
