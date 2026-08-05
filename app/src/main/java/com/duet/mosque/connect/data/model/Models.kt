@@ -7,18 +7,18 @@ import java.util.UUID
 // Room entity to store prayer times
 @Entity(tableName = "prayer_times")
 data class PrayerTimeEntity(
-    @PrimaryKey val id: String, // "fajr", "zuhr", "asr", "maghrib", "isha", "jummah"
-    val name: String,
-    val azanTime: String,
-    val jamatTime: String
+    @PrimaryKey val id: String = "", // "fajr", "zuhr", "asr", "maghrib", "isha", "jummah"
+    val name: String = "",
+    val azanTime: String = "",
+    val jamatTime: String = ""
 )
 
 // Room entity for Announcements
 @Entity(tableName = "announcements")
 data class AnnouncementEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val title: String,
-    val content: String,
+    val title: String = "",
+    val content: String = "",
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -26,11 +26,11 @@ data class AnnouncementEntity(
 @Entity(tableName = "events")
 data class EventEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val title: String,
-    val description: String,
-    val date: String,
-    val time: String,
-    val location: String,
+    val title: String = "",
+    val description: String = "",
+    val date: String = "",
+    val time: String = "",
+    val location: String = "",
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -38,10 +38,10 @@ data class EventEntity(
 @Entity(tableName = "janaza")
 data class JanazaEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
-    val name: String, // Name of the deceased
-    val date: String,
-    val time: String,
-    val location: String,
+    val name: String = "", // Name of the deceased
+    val date: String = "",
+    val time: String = "",
+    val location: String = "",
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -61,10 +61,10 @@ data class RamadanEntity(
 @Entity(tableName = "eid")
 data class EidEntity(
     @PrimaryKey val id: Int = 1,
-    val prayerTime: String,
-    val takbirReminder: String,
-    val parkingInfo: String,
-    val specialNotice: String
+    val prayerTime: String = "",
+    val takbirReminder: String = "",
+    val parkingInfo: String = "",
+    val specialNotice: String = ""
 )
 
 // Simple data class for Imam's Contact Information

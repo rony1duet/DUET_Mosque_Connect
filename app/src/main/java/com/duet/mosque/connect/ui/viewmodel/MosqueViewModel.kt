@@ -127,6 +127,7 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         // Ensure initial data is seeded
         viewModelScope.launch {
             repository.checkAndSeedDatabase()
+            repository.syncWithFirebase()
             startCountdownTimer()
         }
     }
