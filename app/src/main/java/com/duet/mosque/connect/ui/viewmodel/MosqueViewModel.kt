@@ -85,9 +85,6 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     private val _eventNoticesEnabled = MutableStateFlow(secPrefs.getBoolean("pref_event_notices", true))
     val eventNoticesEnabled: StateFlow<Boolean> = _eventNoticesEnabled.asStateFlow()
 
-    private val _timeFormat24h = MutableStateFlow(secPrefs.getBoolean("pref_time_format_24h", false))
-    val timeFormat24h: StateFlow<Boolean> = _timeFormat24h.asStateFlow()
-
     fun setJamatReminders(enabled: Boolean) {
         _jamatRemindersEnabled.value = enabled
         secPrefs.edit().putBoolean("pref_jamat_reminders", enabled).apply()
@@ -101,11 +98,6 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     fun setEventNotices(enabled: Boolean) {
         _eventNoticesEnabled.value = enabled
         secPrefs.edit().putBoolean("pref_event_notices", enabled).apply()
-    }
-
-    fun setTimeFormat24h(enabled: Boolean) {
-        _timeFormat24h.value = enabled
-        secPrefs.edit().putBoolean("pref_time_format_24h", enabled).apply()
     }
 
     private fun getSavedPasscode(): String {
@@ -272,8 +264,10 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
 
     // Simulated Push Notifications via FCM Flow
     fun sendSimulatedPushNotification(title: String, body: String) {
-        val newLog = NotificationLog(title = title, body = body)
-        _notificationLogs.value = listOf(newLog) + _notificationLogs.value
+        if (_eventNoticesEnabled.value) {
+            val newLog = NotificationLog(title = title, body = body)
+            _notificationLogs.value = listOf(newLog) + _notificationLogs.value
+        }
     }
 
     // Dynamic Countdown and current active prayer parser

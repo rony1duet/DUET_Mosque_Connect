@@ -467,7 +467,7 @@ fun HomeScreen(viewModel: MosqueViewModel, onNavigateToTab: (TabScreen) -> Unit)
                         val displayPrayers = prayers.filter { it.id != "jummah" }
                         displayPrayers.forEach { prayer ->
                             val isActive = prayer.name.equals(currentPrayerName, ignoreCase = true) || prayer.name.equals(nextJamatName, ignoreCase = true)
-                            val cardBg = if (isActive) CreamAccent else MaterialTheme.colorScheme.background
+                            val cardBg = if (isActive) GoldAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.background
                             val borderCol = if (isActive) GoldAccent else Color.Transparent
                             val borderWidth = if (isActive) 2.dp else 1.dp
                             val textCol = if (isActive) EmeraldGreen else MaterialTheme.colorScheme.onSurface
@@ -882,7 +882,7 @@ fun PrayerTimesScreen(viewModel: MosqueViewModel) {
         ) {
             prayers.forEach { prayer ->
                 val isCurrent = prayer.name.equals(currentPrayerName, ignoreCase = true) || prayer.name.equals(nextJamatName, ignoreCase = true)
-                val cardColor = if (isCurrent) CreamAccent else MaterialTheme.colorScheme.surface
+                val cardColor = if (isCurrent) GoldAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
                 val borderColor = if (isCurrent) GoldAccent else MaterialTheme.colorScheme.surfaceVariant
 
                 OutlinedCard(
@@ -2132,6 +2132,7 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
     val notificationLogs by viewModel.notificationLogs.collectAsState()
 
     val jamatReminders by viewModel.jamatRemindersEnabled.collectAsState()
+    val adhanSound by viewModel.adhanSoundEnabled.collectAsState()
     val eventNotices by viewModel.eventNoticesEnabled.collectAsState()
 
     var showLoginDialog by remember { mutableStateOf(false) }
@@ -2191,9 +2192,19 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
                     // Jamat Reminders Toggle
                     SettingToggleRow(
                         title = "Jamat Prayer Alerts",
-                        description = "Receive push reminder 15 mins before Jamat",
+                        description = "Receive push audio & vibration reminder before Jamat",
                         checked = jamatReminders,
                         onCheckedChange = { viewModel.setJamatReminders(it) }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Adhan Audio Sound Toggle
+                    SettingToggleRow(
+                        title = "Adhan Audio Alert",
+                        description = "Trigger full Adhan audio chime at Azan times",
+                        checked = adhanSound,
+                        onCheckedChange = { viewModel.setAdhanSound(it) }
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -2201,7 +2212,7 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
                     // Event Notices Toggle
                     SettingToggleRow(
                         title = "Mosque Updates & Janaza Alerts",
-                        description = "Receive broadcast notifications for new updates",
+                        description = "Receive broadcast push alerts for new announcements & Janaza",
                         checked = eventNotices,
                         onCheckedChange = { viewModel.setEventNotices(it) }
                     )
@@ -2209,13 +2220,17 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
             }
         }
 
-        // Role & Access Security Card
+        // Role & Access Security Card (Redesigned for seamless Dark & White theme compatibility)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isAdminLoggedIn) CreamAccent else MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isAdminLoggedIn) EmeraldGreen.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                 ),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
@@ -2245,14 +2260,14 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isAdminLoggedIn) EmeraldGreen else NoticeRed.copy(alpha = 0.1f))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .background(if (isAdminLoggedIn) EmeraldGreen.copy(alpha = 0.15f) else NoticeRed.copy(alpha = 0.1f))
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
                             Text(
                                 text = if (isAdminLoggedIn) "ADMIN ACTIVE" else "STUDENT GUEST",
-                                fontSize = 9.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isAdminLoggedIn) TextLight else NoticeRed
+                                color = if (isAdminLoggedIn) EmeraldGreen else NoticeRed
                             )
                         }
                     }
@@ -2260,7 +2275,7 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = if (isAdminLoggedIn) {
-                            "Authenticated as Imam. You hold access to modify Jamat schedules, post announcements, and broadcast alerts."
+                            "Authenticated as Imam. You hold access to modify Jamat schedules, post announcements, broadcast alerts, and manage Ramadan/Eid timings."
                         } else {
                             "Standard Student View. Imam credentials are required to edit Jamat schedules or publish updates."
                         },
@@ -2300,7 +2315,7 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("Logout", fontSize = 11.sp)
+                                Text("Logout", fontSize = 11.sp, color = Color.White)
                             }
                         }
                     } else {
@@ -2318,7 +2333,7 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Imam Login", fontSize = 13.sp)
+                                Text("Imam Login", fontSize = 13.sp, color = TextLight)
                             }
                         }
                     }
