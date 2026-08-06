@@ -5,8 +5,8 @@ import androidx.room.PrimaryKey
 import java.util.UUID
 
 // Room entity to store prayer times
-@Entity(tableName = "prayer_times")
-data class PrayerTimeEntity(
+@Entity(tableName = "Schedule")
+data class ScheduleEntity(
     @PrimaryKey val id: String, // "fajr", "zuhr", "asr", "maghrib", "isha", "jummah"
     val name: String,
     val azanTime: String,
@@ -14,8 +14,8 @@ data class PrayerTimeEntity(
 )
 
 // Room entity for Announcements
-@Entity(tableName = "announcements")
-data class AnnouncementEntity(
+@Entity(tableName = "News")
+data class NewsEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val title: String,
     val content: String,
@@ -23,7 +23,7 @@ data class AnnouncementEntity(
 )
 
 // Room entity for Islamic Events
-@Entity(tableName = "events")
+@Entity(tableName = "Events")
 data class EventEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -35,7 +35,7 @@ data class EventEntity(
 )
 
 // Room entity for Janaza Notices
-@Entity(tableName = "janaza")
+@Entity(tableName = "Janaza")
 data class JanazaEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val name: String, // Name of the deceased
@@ -46,25 +46,25 @@ data class JanazaEntity(
 )
 
 // Room entity for Ramadan info & Fasting/Solar limits
-@Entity(tableName = "ramadan")
+@Entity(tableName = "Ramadan")
 data class RamadanEntity(
     @PrimaryKey val id: Int = 1,
     val sehriTime: String = "04:30 AM",
     val iftarTime: String = "06:45 PM",
-    val taraweehTime: String = "09:00 PM",
     val sunriseTime: String = "05:24 AM",
     val sunsetTime: String = "06:46 PM",
     val notes: String = "Current Fasting & Solar Limits for DUET Central Mosque"
 )
 
 // Room entity for Eid info
-@Entity(tableName = "eid")
+@Entity(tableName = "Eid")
 data class EidEntity(
     @PrimaryKey val id: Int = 1,
     val prayerTime: String,
     val takbirReminder: String,
     val parkingInfo: String,
-    val specialNotice: String
+    val specialNotice: String,
+    val isEnabled: Boolean = true
 )
 
 // Simple data class for Imam's Contact Information

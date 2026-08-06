@@ -11,6 +11,10 @@ import android.os.VibratorManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
@@ -51,6 +55,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompassCalibration
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -93,6 +99,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
@@ -132,11 +139,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.duet.mosque.connect.data.model.AnnouncementEntity
+import com.duet.mosque.connect.data.model.NewsEntity
 import com.duet.mosque.connect.data.model.EidEntity
 import com.duet.mosque.connect.data.model.EventEntity
 import com.duet.mosque.connect.data.model.JanazaEntity
-import com.duet.mosque.connect.data.model.PrayerTimeEntity
+import com.duet.mosque.connect.data.model.ScheduleEntity
 import com.duet.mosque.connect.data.model.RamadanEntity
 import com.duet.mosque.connect.ui.theme.CreamAccent
 import com.duet.mosque.connect.ui.theme.EmeraldGreen
@@ -181,21 +188,53 @@ fun MainAppContainer(viewModel: MosqueViewModel) {
         }
     }
 
-    // GPS location updates
+    // GPS location & permissions updates
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
+
+    val startupPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             try {
                 fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
                     if (location != null) {
                         viewModel.updateGPSLocation(location.latitude, location.longitude)
                     }
                 }
-            } catch (e: SecurityException) {
-                // Permission revoked
-            }
+            } catch (_: SecurityException) {}
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        com.duet.mosque.connect.utils.NotificationHelper.createNotificationChannel(context)
+
+        val fineLocationGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val notificationGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+
+        if (!fineLocationGranted || !notificationGranted) {
+            val permissionsToRequest = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION).apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }.toTypedArray()
+            startupPermissionLauncher.launch(permissionsToRequest)
+        } else {
+            try {
+                fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                    if (location != null) {
+                        viewModel.updateGPSLocation(location.latitude, location.longitude)
+                    }
+                }
+            } catch (_: SecurityException) {}
         }
     }
 
@@ -212,7 +251,7 @@ fun MainAppContainer(viewModel: MosqueViewModel) {
                     }
                 }
             } else {
-                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                startupPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
             }
         }
     }
@@ -259,7 +298,7 @@ fun MainAppContainer(viewModel: MosqueViewModel) {
         ) {
             when (currentTab) {
                 TabScreen.Home -> HomeScreen(viewModel, onNavigateToTab = { currentTab = it })
-                TabScreen.Prayer -> PrayerTimesScreen(viewModel)
+                TabScreen.Prayer -> ScheduleScreen(viewModel)
                 TabScreen.Qibla -> QiblaCompassScreen(viewModel)
                 TabScreen.Events -> EventsAndNoticesScreen(viewModel)
                 TabScreen.Settings -> SettingsAndImamScreen(viewModel)
@@ -275,8 +314,8 @@ fun HomeScreen(viewModel: MosqueViewModel, onNavigateToTab: (TabScreen) -> Unit)
     val nextJamatName by viewModel.nextJamatName.collectAsState()
     val nextJamatTime by viewModel.nextJamatTime.collectAsState()
     val currentPrayerName by viewModel.currentPrayerName.collectAsState()
-    val prayers by viewModel.prayerTimes.collectAsState()
-    val notices by viewModel.announcements.collectAsState()
+    val prayers by viewModel.schedules.collectAsState()
+    val notices by viewModel.news.collectAsState()
     val compassState by viewModel.compassState.collectAsState()
     val ramadan by viewModel.ramadanSchedule.collectAsState()
     val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
@@ -755,7 +794,6 @@ fun HomeScreen(viewModel: MosqueViewModel, onNavigateToTab: (TabScreen) -> Unit)
                 viewModel.updateRamadanSchedule(
                     sehri = sehri,
                     iftar = iftar,
-                    taraweeh = ramadan?.taraweehTime ?: "09:00 PM",
                     notes = ramadan?.notes ?: "DUET Mosque Schedule",
                     sunrise = sunrise,
                     sunset = sunset
@@ -768,15 +806,15 @@ fun HomeScreen(viewModel: MosqueViewModel, onNavigateToTab: (TabScreen) -> Unit)
 
 // 2. PRAYER TIMES SCREEN
 @Composable
-fun PrayerTimesScreen(viewModel: MosqueViewModel) {
+fun ScheduleScreen(viewModel: MosqueViewModel) {
     val context = LocalContext.current
-    val prayers by viewModel.prayerTimes.collectAsState()
+    val prayers by viewModel.schedules.collectAsState()
     val countdown by viewModel.countdownTimer.collectAsState()
     val nextJamatName by viewModel.nextJamatName.collectAsState()
     val currentPrayerName by viewModel.currentPrayerName.collectAsState()
     val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
 
-    var editingPrayer by remember { mutableStateOf<PrayerTimeEntity?>(null) }
+    var editingPrayer by remember { mutableStateOf<ScheduleEntity?>(null) }
 
     fun parseTimeString(timeStr: String): Pair<Int, Int> {
         return try {
@@ -906,22 +944,6 @@ fun PrayerTimesScreen(viewModel: MosqueViewModel) {
                                     fontWeight = FontWeight.Bold,
                                     color = if (isCurrent) EmeraldGreen else MaterialTheme.colorScheme.onSurface
                                 )
-                                if (isCurrent) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(EmeraldGreen)
-                                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = "Active Jamat",
-                                            color = TextLight,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(
@@ -975,7 +997,7 @@ fun PrayerTimesScreen(viewModel: MosqueViewModel) {
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.updatePrayerTime(prayer.id, prayer.name, azanInput, jamatInput)
+                        viewModel.updateSchedule(prayer.id, prayer.name, azanInput, jamatInput)
                         editingPrayer = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
@@ -1478,8 +1500,25 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventsAndNoticesScreen(viewModel: MosqueViewModel) {
+    val eid by viewModel.eidSchedule.collectAsState()
+    val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
+    val isEidEnabled = eid?.isEnabled == true
+
     var activeTab by remember { mutableIntStateOf(0) }
-    val tabNames = listOf("News", "Events", "Janaza", "Eid")
+
+    val tabNames = remember(isEidEnabled, isAdminLoggedIn) {
+        if (isEidEnabled || isAdminLoggedIn) {
+            listOf("News", "Events", "Janaza", "Eid")
+        } else {
+            listOf("News", "Events", "Janaza")
+        }
+    }
+
+    LaunchedEffect(tabNames.size) {
+        if (activeTab >= tabNames.size) {
+            activeTab = 0
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1502,26 +1541,34 @@ fun EventsAndNoticesScreen(viewModel: MosqueViewModel) {
         )
         Spacer(modifier = Modifier.height(8.dp))
 
-        PrimaryScrollableTabRow(
-            selectedTabIndex = activeTab,
-            containerColor = MaterialTheme.colorScheme.background,
-            contentColor = EmeraldGreen,
-            edgePadding = 16.dp,
-            divider = {}
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             tabNames.forEachIndexed { index, name ->
-                Tab(
-                    selected = activeTab == index,
-                    onClick = { activeTab = index },
-                    text = {
-                        Text(
-                            text = name,
-                            fontSize = 13.sp,
-                            fontWeight = if (activeTab == index) FontWeight.Bold else FontWeight.Medium,
-                            maxLines = 1
-                        )
-                    }
-                )
+                val isSelected = activeTab == index
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isSelected) EmeraldGreen else Color.Transparent)
+                        .clickable { activeTab = index }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = name,
+                        fontSize = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) TextLight else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        maxLines = 1
+                    )
+                }
             }
         }
 
@@ -1530,23 +1577,24 @@ fun EventsAndNoticesScreen(viewModel: MosqueViewModel) {
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
-            when (activeTab) {
-                0 -> AnnouncementsTab(viewModel)
-                1 -> EventsTab(viewModel)
-                2 -> JanazaTab(viewModel)
-                3 -> EidTab(viewModel)
+            val selectedTabName = tabNames.getOrNull(activeTab) ?: "News"
+            when (selectedTabName) {
+                "News" -> NewsTab(viewModel)
+                "Events" -> EventsTab(viewModel)
+                "Janaza" -> JanazaTab(viewModel)
+                "Eid" -> EidTab(viewModel)
             }
         }
     }
 }
 
 @Composable
-fun AnnouncementsTab(viewModel: MosqueViewModel) {
-    val announcements by viewModel.announcements.collectAsState()
+fun NewsTab(viewModel: MosqueViewModel) {
+    val newsList by viewModel.news.collectAsState()
     val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
-    var editingNotice by remember { mutableStateOf<AnnouncementEntity?>(null) }
+    var editingNotice by remember { mutableStateOf<NewsEntity?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (isAdminLoggedIn) {
@@ -1564,7 +1612,7 @@ fun AnnouncementsTab(viewModel: MosqueViewModel) {
             }
         }
 
-        if (announcements.isEmpty()) {
+        if (newsList.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().padding(top = 32.dp), contentAlignment = Alignment.Center) {
                 Text(
                     text = "No announcements published.",
@@ -1577,7 +1625,7 @@ fun AnnouncementsTab(viewModel: MosqueViewModel) {
                 modifier = Modifier.weight(1f, fill = false),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(announcements) { notice ->
+                items(newsList) { notice ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
@@ -1612,7 +1660,7 @@ fun AnnouncementsTab(viewModel: MosqueViewModel) {
                                         }
                                         Spacer(modifier = Modifier.width(4.dp))
                                         IconButton(
-                                            onClick = { viewModel.deleteAnnouncement(notice.id) },
+                                            onClick = { viewModel.deleteNews(notice.id) },
                                             modifier = Modifier.size(28.dp)
                                         ) {
                                             Icon(
@@ -1656,27 +1704,27 @@ fun AnnouncementsTab(viewModel: MosqueViewModel) {
     }
 
     if (showAddDialog) {
-        AnnouncementDialog(
-            dialogTitle = "Add Announcement",
+        NewsDialog(
+            dialogTitle = "Add News",
             initialTitle = "",
             initialContent = "",
             onDismiss = { showAddDialog = false },
             onConfirm = { title, content ->
-                viewModel.addAnnouncement(title, content)
+                viewModel.addNews(title, content)
                 showAddDialog = false
             }
         )
     }
 
     editingNotice?.let { notice ->
-        AnnouncementDialog(
-            dialogTitle = "Edit Announcement",
+        NewsDialog(
+            dialogTitle = "Edit News",
             initialTitle = notice.title,
             initialContent = notice.content,
             onDismiss = { editingNotice = null },
             onConfirm = { title, content ->
-                viewModel.deleteAnnouncement(notice.id)
-                viewModel.addAnnouncement(title, content)
+                viewModel.deleteNews(notice.id)
+                viewModel.addNews(title, content)
                 editingNotice = null
             }
         )
@@ -2007,7 +2055,7 @@ fun EidTab(viewModel: MosqueViewModel) {
 
     var showEditDialog by remember { mutableStateOf(false) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (isAdminLoggedIn) {
             Button(
                 onClick = { showEditDialog = true },
@@ -2028,28 +2076,65 @@ fun EidTab(viewModel: MosqueViewModel) {
                 Text(
                     text = "No Eid schedule published.",
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                 )
             }
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f, fill = false),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 eid?.let { e ->
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    text = "Eid-ul-Fitr Schedule",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EmeraldGreen
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Eid Schedule",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (isAdminLoggedIn) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (e.isEnabled) EmeraldGreen.copy(alpha = 0.12f) else NoticeRed.copy(alpha = 0.12f),
+                                                modifier = Modifier.padding(end = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (e.isEnabled) "Visible" else "Hidden",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (e.isEnabled) EmeraldGreen else NoticeRed,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { showEditDialog = true },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Edit,
+                                                    contentDescription = "Edit",
+                                                    tint = EmeraldGreen,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
                                 Spacer(modifier = Modifier.height(12.dp))
 
                                 Row(
@@ -2075,28 +2160,32 @@ fun EidTab(viewModel: MosqueViewModel) {
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = "Parking Info",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EmeraldGreen
-                                )
-                                Text(
-                                    text = e.parkingInfo,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                    modifier = Modifier.padding(bottom = 8.dp)
-                                )
+                                if (e.parkingInfo.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "Parking Info",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = e.parkingInfo,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    )
+                                }
 
                                 if (e.specialNotice.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(12.dp))
                                     Text(
                                         text = "Special Notice",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = NoticeRed
                                     )
+                                    Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = e.specialNotice,
                                         fontSize = 12.sp,
@@ -2116,8 +2205,8 @@ fun EidTab(viewModel: MosqueViewModel) {
         EidDialog(
             currentEid = eid,
             onDismiss = { showEditDialog = false },
-            onConfirmEid = { prayer, takbir, parking, notice ->
-                viewModel.updateEidSchedule(prayer, takbir, parking, notice)
+            onConfirmEid = { prayer, takbir, parking, notice, isEnabled ->
+                viewModel.updateEidSchedule(prayer, takbir, parking, notice, isEnabled)
                 showEditDialog = false
             }
         )
@@ -2137,355 +2226,362 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
 
     var showLoginDialog by remember { mutableStateOf(false) }
     var showChangeKeyDialog by remember { mutableStateOf(false) }
+    var showAdminLogsPage by remember { mutableStateOf(false) }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Header
-        item {
-            Column {
-                Text(
-                    text = "Settings",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EmeraldGreen
-                )
-                Text(
-                    text = "App preferences, notification controls & Imam portal",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                )
-            }
-        }
-
-        // Notification Preferences Card
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = null,
-                            tint = EmeraldGreen,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Notification Preferences",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = EmeraldGreen
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Jamat Reminders Toggle
-                    SettingToggleRow(
-                        title = "Jamat Prayer Alerts",
-                        description = "Receive push audio & vibration reminder before Jamat",
-                        checked = jamatReminders,
-                        onCheckedChange = { viewModel.setJamatReminders(it) }
+    if (showAdminLogsPage && isAdminLoggedIn) {
+        AdminNotificationLogsScreen(
+            viewModel = viewModel,
+            onBack = { showAdminLogsPage = false }
+        )
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header
+            item {
+                Column {
+                    Text(
+                        text = "Settings",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EmeraldGreen
                     )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Adhan Audio Sound Toggle
-                    SettingToggleRow(
-                        title = "Adhan Audio Alert",
-                        description = "Trigger full Adhan audio chime at Azan times",
-                        checked = adhanSound,
-                        onCheckedChange = { viewModel.setAdhanSound(it) }
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Event Notices Toggle
-                    SettingToggleRow(
-                        title = "Mosque Updates & Janaza Alerts",
-                        description = "Receive broadcast push alerts for new announcements & Janaza",
-                        checked = eventNotices,
-                        onCheckedChange = { viewModel.setEventNotices(it) }
+                    Text(
+                        text = "App preferences, notification controls & Imam portal",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
                 }
             }
-        }
 
-        // Role & Access Security Card (Redesigned for seamless Dark & White theme compatibility)
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = if (isAdminLoggedIn) EmeraldGreen.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+            // Notification Preferences Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = if (isAdminLoggedIn) Icons.Default.Security else Icons.Default.Lock,
+                                imageVector = Icons.Default.Notifications,
                                 contentDescription = null,
                                 tint = EmeraldGreen,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Admin Portal & Security",
+                                text = "Notification Preferences",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EmeraldGreen
                             )
                         }
 
-                        // Status Badge
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isAdminLoggedIn) EmeraldGreen.copy(alpha = 0.15f) else NoticeRed.copy(alpha = 0.1f))
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = if (isAdminLoggedIn) "ADMIN ACTIVE" else "STUDENT GUEST",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isAdminLoggedIn) EmeraldGreen else NoticeRed
-                            )
-                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Jamat Reminders Toggle
+                        SettingToggleRow(
+                            title = "Jamat Prayer Alerts",
+                            description = "Receive push audio & vibration reminder before Jamat",
+                            checked = jamatReminders,
+                            onCheckedChange = { viewModel.setJamatReminders(it) }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Adhan Audio Sound Toggle
+                        SettingToggleRow(
+                            title = "Adhan Audio Alert",
+                            description = "Trigger full Adhan audio chime at Azan times",
+                            checked = adhanSound,
+                            onCheckedChange = { viewModel.setAdhanSound(it) }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Event Notices Toggle
+                        SettingToggleRow(
+                            title = "Mosque Updates & Janaza Alerts",
+                            description = "Receive broadcast push alerts for new announcements & Janaza",
+                            checked = eventNotices,
+                            onCheckedChange = { viewModel.setEventNotices(it) }
+                        )
                     }
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = if (isAdminLoggedIn) {
-                            "Authenticated as Imam. You hold access to modify Jamat schedules, post announcements, broadcast alerts, and manage Ramadan/Eid timings."
-                        } else {
-                            "Standard Student View. Imam credentials are required to edit Jamat schedules or publish updates."
-                        },
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        lineHeight = 16.sp
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    if (isAdminLoggedIn) {
+            // Role & Access Security Card (Redesigned for seamless Dark & White theme compatibility)
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isAdminLoggedIn) EmeraldGreen.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { showChangeKeyDialog = true },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, EmeraldGreen)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Key,
-                                        contentDescription = null,
-                                        tint = EmeraldGreen,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Change Key", fontSize = 11.sp, color = EmeraldGreen)
-                                }
-                            }
-
-                            Button(
-                                onClick = { viewModel.logoutImam() },
-                                colors = ButtonDefaults.buttonColors(containerColor = NoticeRed),
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Logout", fontSize = 11.sp, color = Color.White)
-                            }
-                        }
-                    } else {
-                        Button(
-                            onClick = { showLoginDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = Icons.Default.Security,
+                                    imageVector = if (isAdminLoggedIn) Icons.Default.Security else Icons.Default.Lock,
                                     contentDescription = null,
-                                    tint = TextLight,
-                                    modifier = Modifier.size(18.dp)
+                                    tint = EmeraldGreen,
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Imam Login", fontSize = 13.sp, color = TextLight)
+                                Text(
+                                    text = "Admin Portal & Security",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldGreen
+                                )
+                            }
+
+                            // Status Badge
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isAdminLoggedIn) EmeraldGreen.copy(alpha = 0.15f) else NoticeRed.copy(alpha = 0.1f))
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = if (isAdminLoggedIn) "ADMIN ACTIVE" else "STUDENT GUEST",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isAdminLoggedIn) EmeraldGreen else NoticeRed
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = if (isAdminLoggedIn) {
+                                "Authenticated as Imam. You hold access to modify Jamat schedules, post announcements, broadcast alerts, and manage Ramadan/Eid timings."
+                            } else {
+                                "Standard Student View. Imam credentials are required to edit Jamat schedules or publish updates."
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            lineHeight = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        if (isAdminLoggedIn) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { showChangeKeyDialog = true },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, EmeraldGreen)
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Key,
+                                                contentDescription = null,
+                                                tint = EmeraldGreen,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Change Key", fontSize = 11.sp, color = EmeraldGreen)
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = { viewModel.logoutImam() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = NoticeRed),
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("Logout", fontSize = 11.sp, color = Color.White)
+                                    }
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showAdminLogsPage = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, EmeraldGreen)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Notifications,
+                                                contentDescription = null,
+                                                tint = EmeraldGreen,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "View Push Broadcast Logs",
+                                                fontWeight = FontWeight.Bold,
+                                                color = EmeraldGreen,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = GoldAccent.copy(alpha = 0.25f)
+                                        ) {
+                                            Text(
+                                                text = "${notificationLogs.size} logs",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = EmeraldGreenDark,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Button(
+                                onClick = { showLoginDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Security,
+                                        contentDescription = null,
+                                        tint = TextLight,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Imam Login", fontSize = 13.sp, color = TextLight)
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // Mosque Info & Contact Imam Info Card
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Home,
-                            contentDescription = null,
-                            tint = EmeraldGreen,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+            // Mosque Info & Contact Imam Info Card
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Home,
+                                contentDescription = null,
+                                tint = EmeraldGreen,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "DUET Central Mosque Info",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldGreen
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
                         Text(
-                            text = "DUET Central Mosque Info",
-                            fontSize = 15.sp,
+                            text = "Dhaka University of Engineering & Technology, Gazipur-1707",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "Imam & Khatib Contact",
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = EmeraldGreen
                         )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = "Dhaka University of Engineering & Technology, Gazipur-1707",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Imam & Khatib Contact",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EmeraldGreen
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = viewModel.imamContact.name,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Phone,
-                            contentDescription = null,
-                            tint = EmeraldGreen,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = viewModel.imamContact.phone,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Email,
-                            contentDescription = null,
-                            tint = EmeraldGreen,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = viewModel.imamContact.email,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.AccessTime,
-                            contentDescription = null,
-                            tint = GoldAccent,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Office Hours: ${viewModel.imamContact.officeHours}",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Notification Log Feed (Simulating push logs)
-        if (notificationLogs.isNotEmpty()) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Push Broadcast Logs",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EmeraldGreen
-                    )
-                    TextButton(onClick = { viewModel.clearNotificationLogs() }) {
-                        Text("Clear Logs", fontSize = 11.sp, color = NoticeRed)
-                    }
-                }
-            }
-            items(notificationLogs) { log ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(text = log.title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
-                        Text(text = log.body, fontSize = 11.sp, fontWeight = FontWeight.Medium)
                         Spacer(modifier = Modifier.height(4.dp))
-                        val formattedDate = remember(log.timestamp) {
-                            val formatter = SimpleDateFormat("HH:mm:ss", Locale.US)
-                            formatter.format(Date(log.timestamp))
-                        }
                         Text(
-                            text = "FCM Broadcast: $formattedDate",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                            text = viewModel.imamContact.name,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Phone,
+                                contentDescription = null,
+                                tint = EmeraldGreen,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = viewModel.imamContact.phone,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Email,
+                                contentDescription = null,
+                                tint = EmeraldGreen,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = viewModel.imamContact.email,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AccessTime,
+                                contentDescription = null,
+                                tint = GoldAccent,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Office Hours: ${viewModel.imamContact.officeHours}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 }
             }
@@ -2674,6 +2770,329 @@ fun SettingsAndImamScreen(viewModel: MosqueViewModel) {
             },
             shape = RoundedCornerShape(24.dp)
         )
+    }
+}
+
+// Dedicated Admin-Only Notification Logs Screen
+@Composable
+fun AdminNotificationLogsScreen(
+    viewModel: MosqueViewModel,
+    onBack: () -> Unit
+) {
+    val notificationLogs by viewModel.notificationLogs.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        // Top Header Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onBack() }
+                    .padding(vertical = 4.dp, horizontal = 4.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = EmeraldGreen.copy(alpha = 0.12f),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = EmeraldGreen,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "Push Broadcast Logs",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EmeraldGreen
+                    )
+                    Text(
+                        text = "Admin View • FCM & Broadcast History",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+            }
+
+            if (notificationLogs.isNotEmpty()) {
+                TextButton(
+                    onClick = { viewModel.clearNotificationLogs() },
+                    colors = ButtonDefaults.textButtonColors(contentColor = NoticeRed)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = NoticeRed,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Clear Logs",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // System Channel Banner Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = EmeraldGreen),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = GoldAccent,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = null,
+                                tint = EmeraldGreenDark,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "FCM Notification Engine",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextLight
+                        )
+                        Text(
+                            text = "Jamat Updates & System Alerts Log",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextLight.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = GoldAccent.copy(alpha = 0.25f)
+                ) {
+                    Text(
+                        text = "${notificationLogs.size} SENT",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = GoldAccent,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (notificationLogs.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, EmeraldGreen.copy(alpha = 0.2f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = EmeraldGreen.copy(alpha = 0.12f),
+                            modifier = Modifier.size(64.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Notifications,
+                                    contentDescription = null,
+                                    tint = EmeraldGreen,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "No Broadcast Logs Yet",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldGreen
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "When Jamat schedules are updated or announcements and Janaza notices are published, system push logs will appear here.",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(notificationLogs) { log ->
+                    val icon = when {
+                        log.title.contains("Jamat", ignoreCase = true) || log.title.contains("Schedule", ignoreCase = true) -> Icons.Default.Schedule
+                        log.title.contains("Janaza", ignoreCase = true) -> Icons.Default.Warning
+                        log.title.contains("Event", ignoreCase = true) -> Icons.Default.Event
+                        else -> Icons.Default.Notifications
+                    }
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, EmeraldGreen.copy(alpha = 0.18f)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = EmeraldGreen.copy(alpha = 0.12f),
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = icon,
+                                                contentDescription = null,
+                                                tint = EmeraldGreen,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = log.title,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen
+                                    )
+                                }
+
+                                val formattedTime = remember(log.timestamp) {
+                                    val formatter = SimpleDateFormat("hh:mm:ss a", Locale.US)
+                                    formatter.format(Date(log.timestamp))
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = EmeraldGreen.copy(alpha = 0.08f)
+                                ) {
+                                    Text(
+                                        text = formattedTime,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldGreen,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Text(
+                                text = log.body,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
+                                lineHeight = 17.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = GoldAccent.copy(alpha = 0.2f)
+                                ) {
+                                    Text(
+                                        text = "FCM STATUS: DELIVERED",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = EmeraldGreenDark,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+
+                                Text(
+                                    text = "System Alert ID #${log.timestamp.toString().takeLast(6)}",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2921,7 +3340,7 @@ fun SecurityFeatureItem(title: String, description: String) {
 
 // 6. UPDATE DIALOGS FOR IMAM EDIT & ADD
 @Composable
-fun AnnouncementDialog(
+fun NewsDialog(
     dialogTitle: String,
     initialTitle: String,
     initialContent: String,
@@ -3151,12 +3570,13 @@ fun JanazaDialog(
 fun EidDialog(
     currentEid: EidEntity?,
     onDismiss: () -> Unit,
-    onConfirmEid: (String, String, String, String) -> Unit
+    onConfirmEid: (String, String, String, String, Boolean) -> Unit
 ) {
     var prayerInput by remember { mutableStateOf(currentEid?.prayerTime ?: "07:30 AM") }
     var takbirInput by remember { mutableStateOf(currentEid?.takbirReminder ?: "Takbir begins at 07:15 AM") }
     var parkingInput by remember { mutableStateOf(currentEid?.parkingInfo ?: "Parking near central playground") }
     var noticeInput by remember { mutableStateOf(currentEid?.specialNotice ?: "Bring your own prayer mat.") }
+    var isEnabledInput by remember { mutableStateOf(currentEid?.isEnabled == true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -3165,6 +3585,56 @@ fun EidDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { isEnabledInput = !isEnabledInput },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isEnabledInput) EmeraldGreen.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    border = BorderStroke(1.dp, if (isEnabledInput) EmeraldGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                imageVector = if (isEnabledInput) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = null,
+                                tint = if (isEnabledInput) EmeraldGreen else NoticeRed,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = if (isEnabledInput) "Visible to Students" else "Hidden from Students",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isEnabledInput) EmeraldGreen else MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isEnabledInput) "Eid sub tab is published" else "Eid sub tab is hidden",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isEnabledInput,
+                            onCheckedChange = { isEnabledInput = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = TextLight,
+                                checkedTrackColor = EmeraldGreen
+                            )
+                        )
+                    }
+                }
+
                 TimePickerClickableField(
                     label = "Eid Prayer Time",
                     value = prayerInput,
@@ -3199,7 +3669,7 @@ fun EidDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    onConfirmEid(prayerInput, takbirInput, parkingInput, noticeInput)
+                    onConfirmEid(prayerInput, takbirInput, parkingInput, noticeInput, isEnabledInput)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
             ) {

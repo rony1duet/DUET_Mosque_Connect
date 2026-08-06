@@ -3,12 +3,13 @@ package com.duet.mosque.connect.data.repository
 import android.content.Context
 import android.util.Log
 import com.duet.mosque.connect.data.database.AppDatabase
-import com.duet.mosque.connect.data.model.AnnouncementEntity
+import com.duet.mosque.connect.data.model.NewsEntity
 import com.duet.mosque.connect.data.model.EidEntity
 import com.duet.mosque.connect.data.model.EventEntity
 import com.duet.mosque.connect.data.model.JanazaEntity
-import com.duet.mosque.connect.data.model.PrayerTimeEntity
+import com.duet.mosque.connect.data.model.ScheduleEntity
 import com.duet.mosque.connect.data.model.RamadanEntity
+import com.duet.mosque.connect.utils.NotificationHelper
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentChange
@@ -23,8 +24,8 @@ import kotlinx.coroutines.launch
 class MosqueRepository(private val context: Context) {
 
     private val database = AppDatabase.getDatabase(context)
-    private val prayerTimeDao = database.prayerTimeDao()
-    private val announcementDao = database.announcementDao()
+    private val scheduleDao = database.scheduleDao()
+    private val newsDao = database.newsDao()
     private val eventDao = database.eventDao()
     private val janazaDao = database.janazaDao()
     private val ramadanDao = database.ramadanDao()
@@ -32,6 +33,10 @@ class MosqueRepository(private val context: Context) {
 
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
     private var firestore: FirebaseFirestore? = null
+
+    var onRemoteNotificationReceived: ((title: String, body: String, timestamp: Long) -> Unit)? = null
+    private val processedNotificationIds = mutableSetOf<String>()
+    private val appStartTime = System.currentTimeMillis() - 5000L
 
     init {
         try {
@@ -61,8 +66,8 @@ class MosqueRepository(private val context: Context) {
     }
 
     // Flow getters (Room database serves as local offline cache)
-    val allPrayerTimes: Flow<List<PrayerTimeEntity>> = prayerTimeDao.getAllPrayerTimes()
-    val allAnnouncements: Flow<List<AnnouncementEntity>> = announcementDao.getAllAnnouncements()
+    val allSchedules: Flow<List<ScheduleEntity>> = scheduleDao.getAllSchedules()
+    val allNews: Flow<List<NewsEntity>> = newsDao.getAllNews()
     val allEvents: Flow<List<EventEntity>> = eventDao.getAllEvents()
     val allJanazaNotices: Flow<List<JanazaEntity>> = janazaDao.getAllJanazaNotices()
     val ramadanSchedule: Flow<RamadanEntity?> = ramadanDao.getRamadanSchedule()
@@ -71,14 +76,14 @@ class MosqueRepository(private val context: Context) {
     private fun setupRealtimeListeners() {
         val fs = firestore ?: return
 
-        // 1. Realtime Listener for Prayer Times
+        // 1. Realtime Listener for Schedules
         try {
-            fs.collection("prayer_times").addSnapshotListener { snapshot, error ->
+            fs.collection("Schedule").addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                        Log.w("MosqueRepository", "Firestore prayer_times permission denied. Using local Room cache.")
+                        Log.w("MosqueRepository", "Firestore Schedule permission denied. Using local Room cache.")
                     } else {
-                        Log.w("MosqueRepository", "Listening to prayer_times status: ${error.message}")
+                        Log.w("MosqueRepository", "Listening to Schedule status: ${error.message}")
                     }
                     return@addSnapshotListener
                 }
@@ -87,20 +92,20 @@ class MosqueRepository(private val context: Context) {
                         val name = doc.getString("name") ?: ""
                         val azan = doc.getString("azanTime") ?: ""
                         val jamat = doc.getString("jamatTime") ?: ""
-                        PrayerTimeEntity(id = doc.id, name = name, azanTime = azan, jamatTime = jamat)
+                        ScheduleEntity(id = doc.id, name = name, azanTime = azan, jamatTime = jamat)
                     }
                     repositoryScope.launch {
-                        prayerTimeDao.insertPrayerTimes(list)
+                        scheduleDao.insertSchedules(list)
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e("MosqueRepository", "Prayer times listener failed: ${e.message}")
+            Log.e("MosqueRepository", "Schedule listener failed: ${e.message}")
         }
 
-        // 2. Realtime Listener for Announcements
+        // 2. Realtime Listener for News
         try {
-            fs.collection("announcements").addSnapshotListener { snapshot, error ->
+            fs.collection("News").addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
                 repositoryScope.launch {
                     for (dc in snapshot.documentChanges) {
@@ -110,22 +115,22 @@ class MosqueRepository(private val context: Context) {
                                 val title = doc.getString("title") ?: continue
                                 val content = doc.getString("content") ?: ""
                                 val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
-                                announcementDao.insertAnnouncement(AnnouncementEntity(id = doc.id, title = title, content = content, timestamp = ts))
+                                newsDao.insertNews(NewsEntity(id = doc.id, title = title, content = content, timestamp = ts))
                             }
                             DocumentChange.Type.REMOVED -> {
-                                announcementDao.deleteAnnouncementById(dc.document.id)
+                                newsDao.deleteNewsById(dc.document.id)
                             }
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e("MosqueRepository", "Announcements listener failed: ${e.message}")
+            Log.e("MosqueRepository", "News listener failed: ${e.message}")
         }
 
-        // 3. Realtime Listener for Islamic Events
+        // 3. Realtime Listener for Events
         try {
-            fs.collection("events").addSnapshotListener { snapshot, error ->
+            fs.collection("Events").addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
                 repositoryScope.launch {
                     for (dc in snapshot.documentChanges) {
@@ -153,7 +158,7 @@ class MosqueRepository(private val context: Context) {
 
         // 4. Realtime Listener for Janaza Notices
         try {
-            fs.collection("janaza").addSnapshotListener { snapshot, error ->
+            fs.collection("Janaza").addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
                 repositoryScope.launch {
                     for (dc in snapshot.documentChanges) {
@@ -180,11 +185,10 @@ class MosqueRepository(private val context: Context) {
 
         // 5. Realtime Listener for Ramadan/Solar Limits
         try {
-            fs.collection("ramadan").document("main").addSnapshotListener { doc, error ->
+            fs.collection("Ramadan").document("main").addSnapshotListener { doc, error ->
                 if (error != null || doc == null || !doc.exists()) return@addSnapshotListener
                 val sehri = doc.getString("sehriTime") ?: "04:30 AM"
                 val iftar = doc.getString("iftarTime") ?: "06:45 PM"
-                val taraweeh = doc.getString("taraweehTime") ?: "09:00 PM"
                 val sunrise = doc.getString("sunriseTime") ?: "05:24 AM"
                 val sunset = doc.getString("sunsetTime") ?: "06:46 PM"
                 val notes = doc.getString("notes") ?: "Current Fasting & Solar Limits for DUET Central Mosque."
@@ -194,7 +198,6 @@ class MosqueRepository(private val context: Context) {
                             id = 1,
                             sehriTime = sehri,
                             iftarTime = iftar,
-                            taraweehTime = taraweeh,
                             sunriseTime = sunrise,
                             sunsetTime = sunset,
                             notes = notes
@@ -208,12 +211,13 @@ class MosqueRepository(private val context: Context) {
 
         // 6. Realtime Listener for Eid Schedule
         try {
-            fs.collection("eid").document("main").addSnapshotListener { doc, error ->
+            fs.collection("Eid").document("main").addSnapshotListener { doc, error ->
                 if (error != null || doc == null || !doc.exists()) return@addSnapshotListener
                 val prayerTime = doc.getString("prayerTime") ?: "07:30 AM"
                 val takbir = doc.getString("takbirReminder") ?: "Takbir recitations begin at 07:15 AM"
                 val parking = doc.getString("parkingInfo") ?: ""
                 val notice = doc.getString("specialNotice") ?: ""
+                val isEnabled = doc.getBoolean("isEnabled") ?: false
                 repositoryScope.launch {
                     eidDao.insertEidSchedule(
                         EidEntity(
@@ -221,7 +225,8 @@ class MosqueRepository(private val context: Context) {
                             prayerTime = prayerTime,
                             takbirReminder = takbir,
                             parkingInfo = parking,
-                            specialNotice = notice
+                            specialNotice = notice,
+                            isEnabled = isEnabled
                         )
                     )
                 }
@@ -229,48 +234,168 @@ class MosqueRepository(private val context: Context) {
         } catch (e: Exception) {
             Log.e("MosqueRepository", "Eid listener failed: ${e.message}")
         }
+
+        // 7. Realtime Listener for Broadcast Push Notifications across ALL installed devices
+        try {
+            fs.collection("PushNotifications").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                repositoryScope.launch {
+                    for (dc in snapshot.documentChanges) {
+                        if (dc.type == DocumentChange.Type.ADDED) {
+                            val doc = dc.document
+                            val docId = doc.id
+                            val title = doc.getString("title") ?: continue
+                            val body = doc.getString("body") ?: ""
+                            val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
+
+                            // Check if this push notification is new and not yet processed on this device
+                            if (ts >= appStartTime && !processedNotificationIds.contains(docId)) {
+                                processedNotificationIds.add(docId)
+
+                                // Trigger System Status Bar Push Notification on THIS device!
+                                NotificationHelper.triggerSystemNotification(
+                                    context = context,
+                                    title = title,
+                                    body = body
+                                )
+
+                                onRemoteNotificationReceived?.invoke(title, body, ts)
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MosqueRepository", "PushNotifications listener failed: ${e.message}")
+        }
     }
 
-    fun checkAndSeedDatabase() {
-        // Seeding logic removed to ensure fresh start without dummy data.
+    suspend fun checkAndSeedDatabase() {
+        val defaultPrayers = listOf(
+            ScheduleEntity("fajr", "Fajr", "04:35 AM", "04:55 AM"),
+            ScheduleEntity("zuhr", "Dhuhr", "12:05 PM", "01:20 PM"),
+            ScheduleEntity("asr", "Asr", "04:30 PM", "05:15 PM"),
+            ScheduleEntity("maghrib", "Maghrib", "06:56 PM", "06:56 PM"),
+            ScheduleEntity("isha", "Isha", "08:30 PM", "09:00 PM"),
+            ScheduleEntity("jummah", "Jumma", "12:05 PM", "01:30 PM")
+        )
+        scheduleDao.insertSchedules(defaultPrayers)
+
+        firestore?.let { fs ->
+            try {
+                defaultPrayers.forEach { prayer ->
+                    val map = mapOf(
+                        "name" to prayer.name,
+                        "azanTime" to prayer.azanTime,
+                        "jamatTime" to prayer.jamatTime
+                    )
+                    fs.collection("Schedule").document(prayer.id).set(map, SetOptions.merge())
+                }
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Seeding prayer times to Firestore failed: ${e.message}")
+            }
+        }
+
+        val defaultRamadan = RamadanEntity(
+            sehriTime = "04:30 AM",
+            iftarTime = "06:45 PM",
+            sunriseTime = "05:24 AM",
+            sunsetTime = "06:46 PM",
+            notes = "Current Fasting & Solar Limits for DUET Central Mosque."
+        )
+        ramadanDao.insertRamadanSchedule(defaultRamadan)
+
+        firestore?.let { fs ->
+            try {
+                val map = mapOf(
+                    "sehriTime" to defaultRamadan.sehriTime,
+                    "iftarTime" to defaultRamadan.iftarTime,
+                    "sunriseTime" to defaultRamadan.sunriseTime,
+                    "sunsetTime" to defaultRamadan.sunsetTime,
+                    "notes" to defaultRamadan.notes
+                )
+                fs.collection("Ramadan").document("main").set(map, SetOptions.merge())
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "Seeding ramadan to Firestore failed: ${e.message}")
+            }
+        }
+
+        val defaultEid = EidEntity(
+            prayerTime = "07:30 AM",
+            takbirReminder = "Takbir recitations begin at 07:15 AM",
+            parkingInfo = "Student parking at DUET Central Playground. Teacher parking near Administrative building.",
+            specialNotice = "Bring your own prayer mat.",
+            isEnabled = false
+        )
+        eidDao.insertEidSchedule(defaultEid)
+        firestore?.let { fs ->
+            try {
+                val map = mapOf(
+                    "prayerTime" to defaultEid.prayerTime,
+                    "takbirReminder" to defaultEid.takbirReminder,
+                    "parkingInfo" to defaultEid.parkingInfo,
+                    "specialNotice" to defaultEid.specialNotice,
+                    "isEnabled" to defaultEid.isEnabled
+                )
+                fs.collection("Eid").document("main").set(map, SetOptions.merge())
+            } catch (_: Exception) {}
+        }
     }
 
-    // Update Prayer Times
-    suspend fun updatePrayerTime(id: String, name: String, azanTime: String, jamat: String) {
-        val entity = PrayerTimeEntity(id, name, azanTime, jamat)
-        prayerTimeDao.updatePrayerTime(entity)
+    // Publish cross-device push notification to Firestore
+    suspend fun publishPushNotification(title: String, body: String) {
+        firestore?.let { fs ->
+            try {
+                val doc = mapOf(
+                    "title" to title,
+                    "body" to body,
+                    "timestamp" to System.currentTimeMillis()
+                )
+                fs.collection("PushNotifications").add(doc)
+            } catch (e: Exception) {
+                Log.e("MosqueRepository", "publishPushNotification failed: ${e.message}")
+            }
+        }
+    }
+
+    // Update Schedule
+    suspend fun updateSchedule(id: String, name: String, azanTime: String, jamat: String) {
+        val entity = ScheduleEntity(id, name, azanTime, jamat)
+        scheduleDao.updateSchedule(entity)
         firestore?.let { fs ->
             try {
                 val map = mapOf("name" to name, "azanTime" to azanTime, "jamatTime" to jamat)
-                fs.collection("prayer_times").document(id).set(map, SetOptions.merge())
+                fs.collection("Schedule").document(id).set(map, SetOptions.merge())
+                publishPushNotification("Jamat Schedule Updated", "$name Jamat time updated to $jamat (Azan: $azanTime)")
             } catch (e: Exception) {
-                Log.e("MosqueRepository", "Firestore updatePrayerTime failed: ${e.message}")
+                Log.e("MosqueRepository", "Firestore updateSchedule failed: ${e.message}")
             }
         }
     }
 
-    // Add Announcement
-    suspend fun addAnnouncement(title: String, content: String) {
-        val entity = AnnouncementEntity(title = title, content = content)
-        announcementDao.insertAnnouncement(entity)
+    // Add News
+    suspend fun addNews(title: String, content: String) {
+        val entity = NewsEntity(title = title, content = content)
+        newsDao.insertNews(entity)
         firestore?.let { fs ->
             try {
                 val map = mapOf("title" to title, "content" to content, "timestamp" to entity.timestamp)
-                fs.collection("announcements").document(entity.id).set(map)
+                fs.collection("News").document(entity.id).set(map)
+                publishPushNotification("New Announcement", title)
             } catch (e: Exception) {
-                Log.e("MosqueRepository", "Firestore addAnnouncement failed: ${e.message}")
+                Log.e("MosqueRepository", "Firestore addNews failed: ${e.message}")
             }
         }
     }
 
-    // Delete Announcement
-    suspend fun deleteAnnouncementById(id: String) {
-        announcementDao.deleteAnnouncementById(id)
+    // Delete News
+    suspend fun deleteNewsById(id: String) {
+        newsDao.deleteNewsById(id)
         firestore?.let { fs ->
             try {
-                fs.collection("announcements").document(id).delete()
+                fs.collection("News").document(id).delete()
             } catch (e: Exception) {
-                Log.e("MosqueRepository", "Firestore deleteAnnouncement failed: ${e.message}")
+                Log.e("MosqueRepository", "Firestore deleteNews failed: ${e.message}")
             }
         }
     }
@@ -289,7 +414,8 @@ class MosqueRepository(private val context: Context) {
                     "location" to location,
                     "timestamp" to entity.timestamp
                 )
-                fs.collection("events").document(entity.id).set(map)
+                fs.collection("Events").document(entity.id).set(map)
+                publishPushNotification("Upcoming Event", "$title - Scheduled on $date")
             } catch (e: Exception) {
                 Log.e("MosqueRepository", "Firestore addEvent failed: ${e.message}")
             }
@@ -301,7 +427,7 @@ class MosqueRepository(private val context: Context) {
         eventDao.deleteEventById(id)
         firestore?.let { fs ->
             try {
-                fs.collection("events").document(id).delete()
+                fs.collection("Events").document(id).delete()
             } catch (e: Exception) {
                 Log.e("MosqueRepository", "Firestore deleteEvent failed: ${e.message}")
             }
@@ -321,7 +447,8 @@ class MosqueRepository(private val context: Context) {
                     "location" to location,
                     "timestamp" to entity.timestamp
                 )
-                fs.collection("janaza").document(entity.id).set(map)
+                fs.collection("Janaza").document(entity.id).set(map)
+                publishPushNotification("Janaza Notice", "Janaza prayer for $name on $date at $time")
             } catch (e: Exception) {
                 Log.e("MosqueRepository", "Firestore addJanaza failed: ${e.message}")
             }
@@ -333,7 +460,7 @@ class MosqueRepository(private val context: Context) {
         janazaDao.deleteJanazaById(id)
         firestore?.let { fs ->
             try {
-                fs.collection("janaza").document(id).delete()
+                fs.collection("Janaza").document(id).delete()
             } catch (e: Exception) {
                 Log.e("MosqueRepository", "Firestore deleteJanaza failed: ${e.message}")
             }
@@ -344,7 +471,6 @@ class MosqueRepository(private val context: Context) {
     suspend fun updateRamadanSchedule(
         sehri: String,
         iftar: String,
-        taraweeh: String,
         notes: String,
         sunrise: String = "5:24 AM",
         sunset: String = "6:46 PM"
@@ -353,7 +479,6 @@ class MosqueRepository(private val context: Context) {
             id = 1,
             sehriTime = sehri,
             iftarTime = iftar,
-            taraweehTime = taraweeh,
             sunriseTime = sunrise,
             sunsetTime = sunset,
             notes = notes
@@ -364,12 +489,12 @@ class MosqueRepository(private val context: Context) {
                 val map = mapOf(
                     "sehriTime" to sehri,
                     "iftarTime" to iftar,
-                    "taraweehTime" to taraweeh,
                     "sunriseTime" to sunrise,
                     "sunsetTime" to sunset,
                     "notes" to notes
                 )
-                fs.collection("ramadan").document("main").set(map, SetOptions.merge())
+                fs.collection("Ramadan").document("main").set(map, SetOptions.merge())
+                publishPushNotification("Fasting & Solar Limits Updated", "Sehri: $sehri, Iftar: $iftar")
             } catch (e: Exception) {
                 Log.e("MosqueRepository", "Firestore updateRamadanSchedule failed: ${e.message}")
             }
@@ -377,13 +502,14 @@ class MosqueRepository(private val context: Context) {
     }
 
     // Update Eid
-    suspend fun updateEidSchedule(prayer: String, takbir: String, parking: String, notice: String) {
+    suspend fun updateEidSchedule(prayer: String, takbir: String, parking: String, notice: String, isEnabled: Boolean = true) {
         val entity = EidEntity(
             id = 1,
             prayerTime = prayer,
             takbirReminder = takbir,
             parkingInfo = parking,
-            specialNotice = notice
+            specialNotice = notice,
+            isEnabled = isEnabled
         )
         eidDao.insertEidSchedule(entity)
         firestore?.let { fs ->
@@ -392,9 +518,11 @@ class MosqueRepository(private val context: Context) {
                     "prayerTime" to prayer,
                     "takbirReminder" to takbir,
                     "parkingInfo" to parking,
-                    "specialNotice" to notice
+                    "specialNotice" to notice,
+                    "isEnabled" to isEnabled
                 )
-                fs.collection("eid").document("main").set(map, SetOptions.merge())
+                fs.collection("Eid").document("main").set(map, SetOptions.merge())
+                publishPushNotification("Eid Schedule Updated", "Prayer Time: $prayer")
             } catch (e: Exception) {
                 Log.e("MosqueRepository", "Firestore updateEidSchedule failed: ${e.message}")
             }

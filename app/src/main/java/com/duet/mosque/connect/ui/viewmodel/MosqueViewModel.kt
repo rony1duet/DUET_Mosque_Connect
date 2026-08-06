@@ -4,12 +4,12 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.duet.mosque.connect.data.model.AnnouncementEntity
+import com.duet.mosque.connect.data.model.NewsEntity
 import com.duet.mosque.connect.data.model.EidEntity
 import com.duet.mosque.connect.data.model.EventEntity
 import com.duet.mosque.connect.data.model.ImamContact
 import com.duet.mosque.connect.data.model.JanazaEntity
-import com.duet.mosque.connect.data.model.PrayerTimeEntity
+import com.duet.mosque.connect.data.model.ScheduleEntity
 import com.duet.mosque.connect.data.model.RamadanEntity
 import com.duet.mosque.connect.data.repository.MosqueRepository
 import com.duet.mosque.connect.utils.CompassData
@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -35,16 +36,38 @@ data class NotificationLog(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+data class ActiveNotificationBanner(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val body: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+private fun getPrayerOrderRank(entity: ScheduleEntity): Int {
+    val id = entity.id.lowercase()
+    val name = entity.name.lowercase()
+    return when {
+        id == "fajr" || name.contains("fajr") -> 1
+        id == "zuhr" || name.contains("zuhr") || name.contains("dhuhr") -> 2
+        id == "asr" || name.contains("asr") -> 3
+        id == "maghrib" || name.contains("maghrib") -> 4
+        id == "isha" || name.contains("isha") -> 5
+        id == "jummah" || name.contains("jumm") -> 6
+        else -> 99
+    }
+}
+
 class MosqueViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = MosqueRepository(application)
     private val compassManager = CompassSensorManager(application)
 
     // Room cached data flows
-    val prayerTimes: StateFlow<List<PrayerTimeEntity>> = repository.allPrayerTimes
+    val schedules: StateFlow<List<ScheduleEntity>> = repository.allSchedules
+        .map { list -> list.sortedBy { getPrayerOrderRank(it) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val announcements: StateFlow<List<AnnouncementEntity>> = repository.allAnnouncements
+    val news: StateFlow<List<NewsEntity>> = repository.allNews
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val events: StateFlow<List<EventEntity>> = repository.allEvents
@@ -124,6 +147,12 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     private var timerJob: Job? = null
 
     init {
+        repository.onRemoteNotificationReceived = { title, body, timestamp ->
+            if (_eventNoticesEnabled.value) {
+                val newLog = NotificationLog(title = title, body = body, timestamp = timestamp)
+                _notificationLogs.value = (listOf(newLog) + _notificationLogs.value).distinctBy { it.id }
+            }
+        }
         // Ensure initial data is seeded
         viewModelScope.launch {
             repository.checkAndSeedDatabase()
@@ -194,31 +223,29 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // Database Actions (Imam/Admin only)
-    fun updatePrayerTime(id: String, name: String, azanTime: String, jamatTime: String) {
+    fun updateSchedule(id: String, name: String, azanTime: String, jamatTime: String) {
         viewModelScope.launch {
-            repository.updatePrayerTime(id, name, azanTime, jamatTime)
+            repository.updateSchedule(id, name, azanTime, jamatTime)
             // Trigger automatic countdown re-calc
-            calculateNextJamat(prayerTimes.value)
+            calculateNextJamat(schedules.value)
         }
     }
 
-    fun addAnnouncement(title: String, content: String) {
+    fun addNews(title: String, content: String) {
         viewModelScope.launch {
-            repository.addAnnouncement(title, content)
-            sendSimulatedPushNotification("New Announcement", title)
+            repository.addNews(title, content)
         }
     }
 
-    fun deleteAnnouncement(id: String) {
+    fun deleteNews(id: String) {
         viewModelScope.launch {
-            repository.deleteAnnouncementById(id)
+            repository.deleteNewsById(id)
         }
     }
 
     fun addEvent(title: String, description: String, date: String, time: String, location: String) {
         viewModelScope.launch {
             repository.addEvent(title, description, date, time, location)
-            sendSimulatedPushNotification("Upcoming Event", "$title - Scheduled on $date")
         }
     }
 
@@ -231,7 +258,6 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     fun addJanaza(name: String, date: String, time: String, location: String) {
         viewModelScope.launch {
             repository.addJanaza(name, date, time, location)
-            sendSimulatedPushNotification("Janaza Notice", "Janaza prayer for $name on $date at $time")
         }
     }
 
@@ -244,29 +270,27 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     fun updateRamadanSchedule(
         sehri: String,
         iftar: String,
-        taraweeh: String,
         notes: String,
         sunrise: String = "5:24 AM",
         sunset: String = "6:46 PM"
     ) {
         viewModelScope.launch {
-            repository.updateRamadanSchedule(sehri, iftar, taraweeh, notes, sunrise, sunset)
-            sendSimulatedPushNotification("Fasting & Solar Limits Updated", "Sehri: $sehri, Iftar: $iftar, Sunrise: $sunrise, Sunset: $sunset")
+            repository.updateRamadanSchedule(sehri, iftar, notes, sunrise, sunset)
         }
     }
 
-    fun updateEidSchedule(prayer: String, takbir: String, parking: String, notice: String) {
+    fun updateEidSchedule(prayer: String, takbir: String, parking: String, notice: String, isEnabled: Boolean = true) {
         viewModelScope.launch {
-            repository.updateEidSchedule(prayer, takbir, parking, notice)
-            sendSimulatedPushNotification("Eid-ul-Fitr Schedule Updated", "Prayer Time: $prayer")
+            repository.updateEidSchedule(prayer, takbir, parking, notice, isEnabled)
         }
     }
 
-    // Simulated Push Notifications via FCM Flow
+    // Push Notifications & Alerts Broadcast
     fun sendSimulatedPushNotification(title: String, body: String) {
         if (_eventNoticesEnabled.value) {
-            val newLog = NotificationLog(title = title, body = body)
-            _notificationLogs.value = listOf(newLog) + _notificationLogs.value
+            viewModelScope.launch {
+                repository.publishPushNotification(title, body)
+            }
         }
     }
 
@@ -275,13 +299,13 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
             while (true) {
-                calculateNextJamat(prayerTimes.value)
+                calculateNextJamat(schedules.value)
                 delay(1000)
             }
         }
     }
 
-    private fun calculateNextJamat(prayers: List<PrayerTimeEntity>) {
+    private fun calculateNextJamat(prayers: List<ScheduleEntity>) {
         if (prayers.isEmpty()) return
 
         val now = Calendar.getInstance()
@@ -290,7 +314,7 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         val currentTimeInMinutes = currentHour * 60 + currentMinute
 
         var foundNext = false
-        var nextPrayer: PrayerTimeEntity? = null
+        var nextPrayer: ScheduleEntity? = null
         var minDiff = Int.MAX_VALUE
 
         // Parse and sort all prayers by their Jamat times
