@@ -36,12 +36,26 @@ class MosqueRepository(private val context: Context) {
 
     var onRemoteNotificationReceived: ((title: String, body: String, timestamp: Long) -> Unit)? = null
     private val processedNotificationIds = mutableSetOf<String>()
-    private val appStartTime = System.currentTimeMillis() - 5000L
+    
+    private val secPrefs = context.getSharedPreferences("duet_mosque_sec_prefs", Context.MODE_PRIVATE)
+    
+    // Unique device ID to identify the sender and prevent self-notifications
+    private val myDeviceId = getOrCreateDeviceId()
+
+    private fun getOrCreateDeviceId(): String {
+        var id = secPrefs.getString("my_device_unique_id", null)
+        if (id == null) {
+            id = java.util.UUID.randomUUID().toString()
+            secPrefs.edit().putString("my_device_unique_id", id).apply()
+        }
+        return id
+    }
 
     init {
         try {
             FirebaseApp.initializeApp(context)
             firestore = FirebaseFirestore.getInstance()
+
             try {
                 val auth = FirebaseAuth.getInstance()
                 if (auth.currentUser == null) {
@@ -240,6 +254,9 @@ class MosqueRepository(private val context: Context) {
             fs.collection("PushNotifications").addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
                 repositoryScope.launch {
+                    val lastSeenTs = secPrefs.getLong("last_notified_timestamp", 0L)
+                    var maxTs = lastSeenTs
+
                     for (dc in snapshot.documentChanges) {
                         if (dc.type == DocumentChange.Type.ADDED) {
                             val doc = dc.document
@@ -247,21 +264,38 @@ class MosqueRepository(private val context: Context) {
                             val title = doc.getString("title") ?: continue
                             val body = doc.getString("body") ?: ""
                             val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                            val senderId = doc.getString("senderId") ?: ""
 
-                            // Check if this push notification is new and not yet processed on this device
-                            if (ts >= appStartTime && !processedNotificationIds.contains(docId)) {
+                            // 1. Don't notify the sender device
+                            // 2. Only notify if this is a new notification since last seen
+                            // 3. Avoid double processing the same doc ID
+                            if (senderId != myDeviceId && ts > lastSeenTs && !processedNotificationIds.contains(docId)) {
                                 processedNotificationIds.add(docId)
+                                if (ts > maxTs) maxTs = ts
 
-                                // Trigger System Status Bar Push Notification on THIS device!
-                                NotificationHelper.triggerSystemNotification(
-                                    context = context,
-                                    title = title,
-                                    body = body
-                                )
+                                val eventNoticesEnabled = secPrefs.getBoolean("pref_event_notices", true)
+
+                                if (eventNoticesEnabled) {
+                                    // Trigger System Status Bar Push Notification on THIS device!
+                                    NotificationHelper.triggerSystemNotification(
+                                        context = context,
+                                        title = title,
+                                        body = body,
+                                        soundEnabled = secPrefs.getBoolean("pref_adhan_sound", true),
+                                        vibrateEnabled = true
+                                    )
+                                }
 
                                 onRemoteNotificationReceived?.invoke(title, body, ts)
+                            } else if (senderId == myDeviceId || ts <= lastSeenTs) {
+                                // Even if we don't notify, mark it as processed if it's old or from us
+                                processedNotificationIds.add(docId)
                             }
                         }
+                    }
+                    
+                    if (maxTs > lastSeenTs) {
+                        secPrefs.edit().putLong("last_notified_timestamp", maxTs).apply()
                     }
                 }
             }
@@ -349,7 +383,8 @@ class MosqueRepository(private val context: Context) {
                 val doc = mapOf(
                     "title" to title,
                     "body" to body,
-                    "timestamp" to System.currentTimeMillis()
+                    "timestamp" to System.currentTimeMillis(),
+                    "senderId" to myDeviceId
                 )
                 fs.collection("PushNotifications").add(doc)
             } catch (e: Exception) {

@@ -66,11 +66,3 @@ data class EidEntity(
     val specialNotice: String,
     val isEnabled: Boolean = true
 )
-
-// Simple data class for Imam's Contact Information
-data class ImamContact(
-    val name: String = "Hafez Mawlana Md. Abdul Muktadir",
-    val phone: String = "+880 1700-000000",
-    val email: String = "imam.mosque@duet.ac.bd",
-    val officeHours: String = "Between Asr and Maghrib, Imam's Office, DUET Central Mosque"
-)

@@ -7,7 +7,6 @@ import androidx.lifecycle.viewModelScope
 import com.duet.mosque.connect.data.model.NewsEntity
 import com.duet.mosque.connect.data.model.EidEntity
 import com.duet.mosque.connect.data.model.EventEntity
-import com.duet.mosque.connect.data.model.ImamContact
 import com.duet.mosque.connect.data.model.JanazaEntity
 import com.duet.mosque.connect.data.model.ScheduleEntity
 import com.duet.mosque.connect.data.model.RamadanEntity
@@ -81,9 +80,6 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
 
     val eidSchedule: StateFlow<EidEntity?> = repository.eidSchedule
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
-    // Imam contact info (static)
-    val imamContact = ImamContact()
 
     // Qibla direction data flow
     val compassState: StateFlow<CompassData> = compassManager.compassState

@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -20,6 +21,7 @@ import com.duet.mosque.connect.MainActivity
 
 object NotificationHelper {
 
+    private const val TAG = "NotificationHelper"
     private const val CHANNEL_ID = "duet_mosque_alerts_channel"
     private const val CHANNEL_NAME = "DUET Mosque Alerts & Notices"
     private const val CHANNEL_DESC = "Notifications for Jamat times, Prayer alerts, Janaza notices, and Mosque updates."
@@ -59,21 +61,13 @@ object NotificationHelper {
         soundEnabled: Boolean = true,
         vibrateEnabled: Boolean = true
     ) {
+        Log.d(TAG, "Triggering notification: $title")
         createNotificationChannel(context)
-
-        // Trigger vibration
-        if (vibrateEnabled) {
-            triggerVibration(context)
-        }
-
-        // Trigger sound
-        if (soundEnabled) {
-            triggerSound(context)
-        }
 
         // Check POST_NOTIFICATIONS permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                Log.w(TAG, "Missing POST_NOTIFICATIONS permission")
                 return
             }
         }
@@ -126,8 +120,9 @@ object NotificationHelper {
             val notificationManager = NotificationManagerCompat.from(context)
             val notificationId = (System.currentTimeMillis() % 100000).toInt()
             notificationManager.notify(notificationId, builder.build())
+            Log.d(TAG, "Notification posted successfully")
         } catch (e: SecurityException) {
-            e.printStackTrace()
+            Log.e(TAG, "SecurityException posting notification: ${e.message}")
         }
     }
 
