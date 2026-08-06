@@ -1555,7 +1555,7 @@ fun EventsAndNoticesScreen(viewModel: MosqueViewModel) {
                         text = name,
                         fontSize = 13.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) TextLight else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         maxLines = 1
                     )
                 }

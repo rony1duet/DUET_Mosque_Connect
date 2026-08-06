@@ -64,6 +64,9 @@ object NotificationHelper {
         Log.d(TAG, "Triggering notification: $title")
         createNotificationChannel(context)
 
+        // REMOVED manual triggerSound/vibration here to avoid double sound
+        // The system Notification Channel and Builder already handle this automatically.
+
         // Check POST_NOTIFICATIONS permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {

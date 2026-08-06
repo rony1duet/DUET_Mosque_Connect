@@ -16,6 +16,7 @@ import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -55,6 +56,20 @@ class MosqueRepository(private val context: Context) {
         try {
             FirebaseApp.initializeApp(context)
             firestore = FirebaseFirestore.getInstance()
+
+            // Subscribe to global updates FCM topic for background notifications
+            try {
+                FirebaseMessaging.getInstance().subscribeToTopic("global_updates")
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            Log.d("MosqueRepository", "Subscribed to global_updates FCM topic")
+                        } else {
+                            Log.w("MosqueRepository", "FCM topic subscription failed: ${task.exception?.message}")
+                        }
+                    }
+            } catch (fcmEx: Exception) {
+                Log.w("MosqueRepository", "FCM initialization skipped: ${fcmEx.message}")
+            }
 
             try {
                 val auth = FirebaseAuth.getInstance()
@@ -266,29 +281,28 @@ class MosqueRepository(private val context: Context) {
                             val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
                             val senderId = doc.getString("senderId") ?: ""
 
-                            // 1. Don't notify the sender device
-                            // 2. Only notify if this is a new notification since last seen
-                            // 3. Avoid double processing the same doc ID
-                            if (senderId != myDeviceId && ts > lastSeenTs && !processedNotificationIds.contains(docId)) {
+                            // Check if this push notification is new and not yet processed on this device
+                            if (ts > lastSeenTs && !processedNotificationIds.contains(docId)) {
                                 processedNotificationIds.add(docId)
                                 if (ts > maxTs) maxTs = ts
 
-                                val eventNoticesEnabled = secPrefs.getBoolean("pref_event_notices", true)
-
-                                if (eventNoticesEnabled) {
-                                    // Trigger System Status Bar Push Notification on THIS device!
-                                    NotificationHelper.triggerSystemNotification(
-                                        context = context,
-                                        title = title,
-                                        body = body,
-                                        soundEnabled = secPrefs.getBoolean("pref_adhan_sound", true),
-                                        vibrateEnabled = true
-                                    )
+                                // ONLY trigger system status bar notification if NOT the sender
+                                if (senderId != myDeviceId) {
+                                    val eventNoticesEnabled = secPrefs.getBoolean("pref_event_notices", true)
+                                    if (eventNoticesEnabled) {
+                                        NotificationHelper.triggerSystemNotification(
+                                            context = context,
+                                            title = title,
+                                            body = body,
+                                            soundEnabled = secPrefs.getBoolean("pref_adhan_sound", true),
+                                            vibrateEnabled = true
+                                        )
+                                    }
                                 }
 
+                                // ALWAYS invoke the callback to update the in-app log list
                                 onRemoteNotificationReceived?.invoke(title, body, ts)
-                            } else if (senderId == myDeviceId || ts <= lastSeenTs) {
-                                // Even if we don't notify, mark it as processed if it's old or from us
+                            } else if (ts <= lastSeenTs) {
                                 processedNotificationIds.add(docId)
                             }
                         }

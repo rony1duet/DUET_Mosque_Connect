@@ -17,12 +17,11 @@ class MosqueMessagingService : FirebaseMessagingService() {
         super.onMessageReceived(remoteMessage)
         Log.d("MosqueMessagingService", "FCM message received from: ${remoteMessage.from}")
 
-        // Deduplication and Sender Check
         val secPrefs = getSharedPreferences("duet_mosque_sec_prefs", Context.MODE_PRIVATE)
         val myDeviceId = secPrefs.getString("my_device_unique_id", "")
         val senderId = remoteMessage.data["senderId"] ?: ""
-        
-        // Skip if this message is from us
+
+        // Prevent self-notification
         if (senderId.isNotEmpty() && senderId == myDeviceId) {
             Log.d("MosqueMessagingService", "Skipping self-notification from FCM")
             return
