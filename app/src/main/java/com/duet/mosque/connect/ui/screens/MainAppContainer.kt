@@ -58,16 +58,21 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -166,6 +171,18 @@ fun MainAppContainer(viewModel: MosqueViewModel) {
     val isAdminLoggedIn by viewModel.isAdminLoggedIn.collectAsState()
     val context = LocalContext.current
 
+    val windowManager = remember { context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager }
+    val displayRotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        try { context.display?.rotation ?: android.view.Surface.ROTATION_0 } catch (_: Exception) { android.view.Surface.ROTATION_0 }
+    } else {
+        @Suppress("DEPRECATION")
+        windowManager?.defaultDisplay?.rotation ?: android.view.Surface.ROTATION_0
+    }
+
+    LaunchedEffect(displayRotation) {
+        viewModel.setCompassDisplayRotation(displayRotation)
+    }
+
     // Observe compass orientation only on the Qibla screen to optimize battery/sensors
     DisposableEffect(currentTab) {
         val isQiblaScreen = currentTab == TabScreen.Qibla
@@ -177,20 +194,13 @@ fun MainAppContainer(viewModel: MosqueViewModel) {
         }
     }
 
-    // GPS location & permissions updates
-    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
-
     val startupPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            try {
-                fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-                    if (location != null) {
-                        viewModel.updateGPSLocation(location.latitude, location.longitude)
-                    }
-                }
-            } catch (_: SecurityException) {}
+        if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        ) {
+            viewModel.refreshGPSLocation()
         }
     }
 
@@ -202,6 +212,11 @@ fun MainAppContainer(viewModel: MosqueViewModel) {
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
+        val coarseLocationGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
         val notificationGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
                 context,
@@ -209,38 +224,42 @@ fun MainAppContainer(viewModel: MosqueViewModel) {
             ) == PackageManager.PERMISSION_GRANTED
         } else true
 
-        if (!fineLocationGranted || !notificationGranted) {
-            val permissionsToRequest = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION).apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if ((!fineLocationGranted && !coarseLocationGranted) || !notificationGranted) {
+            val permissionsToRequest = mutableListOf<String>().apply {
+                if (!fineLocationGranted && !coarseLocationGranted) {
+                    add(Manifest.permission.ACCESS_FINE_LOCATION)
+                    add(Manifest.permission.ACCESS_COARSE_LOCATION)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notificationGranted) {
                     add(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }.toTypedArray()
             startupPermissionLauncher.launch(permissionsToRequest)
         } else {
-            try {
-                fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-                    if (location != null) {
-                        viewModel.updateGPSLocation(location.latitude, location.longitude)
-                    }
-                }
-            } catch (_: SecurityException) {}
+            viewModel.refreshGPSLocation()
         }
     }
 
     LaunchedEffect(currentTab) {
         if (currentTab == TabScreen.Qibla) {
-            if (ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
-            ) {
-                fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
-                    if (location != null) {
-                        viewModel.updateGPSLocation(location.latitude, location.longitude)
-                    }
-                }
+            val hasFine = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val hasCoarse = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (hasFine || hasCoarse) {
+                viewModel.refreshGPSLocation()
             } else {
-                startupPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
+                startupPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
             }
         }
     }
@@ -1044,6 +1063,13 @@ fun ScheduleScreen(viewModel: MosqueViewModel) {
 }
 
 // 3. QIBLA SCREEN
+private fun getCompassDirectionLabel(degrees: Float): String {
+    val normalized = (degrees % 360f + 360f) % 360f
+    val directions = arrayOf("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+    val index = ((normalized + 11.25f) / 22.5f).toInt() % 16
+    return directions[index]
+}
+
 @Composable
 fun KaabaIcon(modifier: Modifier = Modifier) {
     Box(
@@ -1081,10 +1107,12 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
     val compassState by viewModel.compassState.collectAsState()
     val context = LocalContext.current
 
-    val isAligned = compassState.hasCompassSensor && (compassState.relativeAngle < 5f || compassState.relativeAngle > 355f)
+    // Alignment is true when relative angle from top of phone is within +/- 3.5 degrees of Kaaba
+    val isAligned = compassState.hasCompassSensor &&
+            (compassState.relativeAngle <= 3.5f || compassState.relativeAngle >= 356.5f)
 
-    var lastAzimuth by remember { mutableStateOf(compassState.azimuth) }
-    var continuousAzimuth by remember { mutableStateOf(compassState.azimuth) }
+    var lastAzimuth by remember { mutableFloatStateOf(compassState.azimuth) }
+    var continuousAzimuth by remember { mutableFloatStateOf(compassState.azimuth) }
     LaunchedEffect(compassState.azimuth) {
         val current = compassState.azimuth
         var delta = current - lastAzimuth
@@ -1093,10 +1121,14 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
         continuousAzimuth += delta
         lastAzimuth = current
     }
-    val animatedNorthAngle by animateFloatAsState(targetValue = -continuousAzimuth)
+    val animatedNorthAngle by animateFloatAsState(
+        targetValue = -continuousAzimuth,
+        animationSpec = tween(durationMillis = 200, easing = LinearEasing),
+        label = "northDialRotation"
+    )
 
-    var lastQibla by remember { mutableStateOf(compassState.relativeAngle) }
-    var continuousQibla by remember { mutableStateOf(compassState.relativeAngle) }
+    var lastQibla by remember { mutableFloatStateOf(compassState.relativeAngle) }
+    var continuousQibla by remember { mutableFloatStateOf(compassState.relativeAngle) }
     LaunchedEffect(compassState.relativeAngle) {
         val current = compassState.relativeAngle
         var delta = current - lastQibla
@@ -1105,11 +1137,19 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
         continuousQibla += delta
         lastQibla = current
     }
-    val animatedQiblaAngle by animateFloatAsState(targetValue = continuousQibla)
+    val animatedQiblaAngle by animateFloatAsState(
+        targetValue = continuousQibla,
+        animationSpec = tween(durationMillis = 200, easing = LinearEasing),
+        label = "qiblaNeedleRotation"
+    )
 
+    var lastVibrationTime by remember { mutableStateOf(0L) }
     var wasAligned by remember { mutableStateOf(false) }
+
     LaunchedEffect(isAligned) {
-        if (isAligned && !wasAligned) {
+        val now = System.currentTimeMillis()
+        if (isAligned && (!wasAligned || (now - lastVibrationTime > 2000L))) {
+            lastVibrationTime = now
             try {
                 val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     val vibratorManager =
@@ -1124,46 +1164,95 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         vibrator.vibrate(
                             VibrationEffect.createOneShot(
-                                50,
+                                70,
                                 VibrationEffect.DEFAULT_AMPLITUDE
                             )
                         )
                     } else {
                         @Suppress("DEPRECATION")
-                        vibrator.vibrate(50)
+                        vibrator.vibrate(70)
                     }
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
             }
         }
         wasAligned = isAligned
     }
 
-    val infiniteTransition = rememberInfiniteTransition()
+    val infiniteTransition = rememberInfiniteTransition(label = "pulseTransition")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
         targetValue = 1.25f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
+            animation = tween(1400, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
-        )
+        ),
+        label = "pulseScale"
     )
     val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.15f,
-        targetValue = 0.5f,
+        targetValue = 0.45f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
+            animation = tween(1400, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
-        )
+        ),
+        label = "pulseAlpha"
     )
+
+    var showCalibrateDialog by remember { mutableStateOf(false) }
+    var isRefreshingLocation by remember { mutableStateOf(false) }
+
+    if (showCalibrateDialog) {
+        AlertDialog(
+            onDismissRequest = { showCalibrateDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CompassCalibration,
+                        contentDescription = null,
+                        tint = EmeraldGreen,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Compass Calibration", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "To ensure high precision Qibla detection:",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "1. Hold your device flat in your palm.\n2. Wave your phone in a figure-8 motion (♾️) 3 to 5 times.\n3. Keep away from magnetic phone cases, iron metal, or electronic appliances.",
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showCalibrateDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
+                ) {
+                    Text("Got It", color = Color.White)
+                }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // TOP TITLE & DIRECTION GUIDANCE
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxWidth()
@@ -1175,77 +1264,109 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                 color = EmeraldGreen
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Dynamic instruction pill
+            val guidanceText = remember(isAligned, compassState.relativeAngle, compassState.hasCompassSensor, compassState.isLevel) {
+                when {
+                    !compassState.hasCompassSensor -> "Compass sensor unavailable on this device"
+                    !compassState.isLevel -> "Hold phone flat horizontally for precision"
+                    isAligned -> "Perfectly Aligned with Kaaba"
+                    compassState.relativeAngle <= 180f -> "Turn Right by ${String.format(Locale.US, "%.0f°", compassState.relativeAngle)}"
+                    else -> "Turn Left by ${String.format(Locale.US, "%.0f°", 360f - compassState.relativeAngle)}"
+                }
+            }
 
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(
-                        if (isAligned) EmeraldGreen.copy(alpha = 0.12f)
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+                        when {
+                            isAligned -> EmeraldGreen.copy(alpha = 0.16f)
+                            !compassState.isLevel -> GoldAccent.copy(alpha = 0.18f)
+                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f)
+                        }
                     )
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                    .border(
+                        width = 1.dp,
+                        color = when {
+                            isAligned -> EmeraldGreen.copy(alpha = 0.5f)
+                            !compassState.isLevel -> GoldAccent.copy(alpha = 0.5f)
+                            else -> Color.Transparent
+                        },
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 7.dp)
             ) {
                 Text(
-                    text = if (isAligned) "Perfectly Aligned with Qibla" else "Align your phone to find the Qibla",
-                    fontSize = 12.sp,
+                    text = guidanceText,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isAligned) EmeraldGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    color = when {
+                        isAligned -> EmeraldGreen
+                        !compassState.isLevel -> Color(0xFFD97706)
+                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    }
                 )
             }
         }
 
+        // COMPASS DIAL OR MISSING SENSOR MESSAGE
         if (!compassState.hasCompassSensor) {
-            Box(
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
+                    .padding(vertical = 12.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Icon(
                         imageVector = Icons.Default.CompassCalibration,
                         contentDescription = null,
-                        tint = EmeraldGreen,
+                        tint = NoticeRed,
                         modifier = Modifier.size(54.dp)
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
-                        text = "Magnetic Sensor Missing",
+                        text = "Magnetic Compass Sensor Missing",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = NoticeRed
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Your device lacks a physical compass sensor. Displaying static angle bearing reference relative to North instead.",
+                        text = "Your device does not have a physical magnetic sensor. The Qibla bearing from your location is approximately ${String.format(Locale.US, "%.1f°", compassState.bearingToKaaba)} from True North.",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         textAlign = TextAlign.Center
                     )
                 }
             }
         } else {
+            // INTERACTIVE 3D COMPASS DIAL
             Box(
                 modifier = Modifier
-                    .size(280.dp),
+                    .size(290.dp)
+                    .padding(4.dp),
                 contentAlignment = Alignment.Center
             ) {
+                // Background aligned glowing pulse
                 if (isAligned) {
                     Box(
                         modifier = Modifier
-                            .size(260.dp)
+                            .size(270.dp)
                             .scale(pulseScale)
                             .clip(CircleShape)
                             .background(
                                 Brush.radialGradient(
                                     colors = listOf(
                                         EmeraldGreen.copy(alpha = pulseAlpha),
+                                        GoldAccent.copy(alpha = pulseAlpha * 0.5f),
                                         Color.Transparent
                                     )
                                 )
@@ -1253,29 +1374,34 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                     )
                 }
 
+                // Dial Outer Frame & Degree Ticks
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val center = Offset(size.width / 2, size.height / 2)
-                    val radius = size.minDimension / 2 - 16f
+                    val radius = size.minDimension / 2 - 14f
 
+                    // Outer circle ring
                     drawCircle(
-                        color = if (isAligned) GoldAccent else EmeraldGreen.copy(alpha = 0.4f),
+                        color = if (isAligned) GoldAccent else EmeraldGreen.copy(alpha = 0.35f),
                         radius = radius,
                         center = center,
-                        style = Stroke(width = if (isAligned) 4.dp.toPx() else 2.dp.toPx())
+                        style = Stroke(width = if (isAligned) 3.5.dp.toPx() else 2.dp.toPx())
                     )
 
+                    // Inner decorative circle
                     drawCircle(
                         color = EmeraldGreen.copy(alpha = 0.1f),
-                        radius = radius - 12.dp.toPx(),
+                        radius = radius - 14.dp.toPx(),
                         center = center,
                         style = Stroke(width = 1.dp.toPx())
                     )
 
-                    for (angle in 0 until 360 step 30) {
-                        val isMajor = angle % 90 == 0
-                        val tickLength = if (isMajor) 12.dp.toPx() else 6.dp.toPx()
-                        val tickWidth = if (isMajor) 2.dp.toPx() else 1.dp.toPx()
-                        val tickColor = if (isMajor) EmeraldGreen.copy(alpha = 0.6f) else EmeraldGreen.copy(alpha = 0.25f)
+                    // Circular ticks every 10 degrees
+                    for (angle in 0 until 360 step 10) {
+                        val isMajor = angle % 30 == 0
+                        val isCardinal = angle % 90 == 0
+                        val tickLength = if (isCardinal) 12.dp.toPx() else if (isMajor) 8.dp.toPx() else 4.dp.toPx()
+                        val tickWidth = if (isCardinal) 2.5.dp.toPx() else if (isMajor) 1.5.dp.toPx() else 1.dp.toPx()
+                        val tickColor = if (isCardinal) EmeraldGreen.copy(alpha = 0.8f) else if (isMajor) EmeraldGreen.copy(alpha = 0.4f) else EmeraldGreen.copy(alpha = 0.2f)
 
                         rotate(degrees = angle.toFloat(), pivot = center) {
                             drawLine(
@@ -1288,6 +1414,24 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                     }
                 }
 
+                // FIXED TOP SIGHT INDICATOR (12 O'CLOCK RETICLE)
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val center = Offset(size.width / 2, size.height / 2)
+                    val radius = size.minDimension / 2 - 14f
+
+                    val sightMarker = Path().apply {
+                        moveTo(center.x, center.y - radius - 6.dp.toPx())
+                        lineTo(center.x - 6.dp.toPx(), center.y - radius - 16.dp.toPx())
+                        lineTo(center.x + 6.dp.toPx(), center.y - radius - 16.dp.toPx())
+                        close()
+                    }
+                    drawPath(
+                        sightMarker,
+                        color = if (isAligned) GoldAccent else EmeraldGreen
+                    )
+                }
+
+                // ROTATING COMPASS ROSE (True North, East, South, West + Kaaba badge on rim)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1295,15 +1439,21 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                     contentAlignment = Alignment.Center
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        Text(
-                            text = "N",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Black,
-                            color = NoticeRed,
+                        // North
+                        Column(
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
-                                .padding(top = 22.dp)
-                        )
+                                .padding(top = 22.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "N",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
+                                color = NoticeRed
+                            )
+                        }
+                        // East
                         Text(
                             text = "E",
                             fontSize = 13.sp,
@@ -1314,6 +1464,7 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                                 .padding(end = 22.dp)
                                 .rotate(90f)
                         )
+                        // South
                         Text(
                             text = "S",
                             fontSize = 13.sp,
@@ -1324,6 +1475,7 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                                 .padding(bottom = 22.dp)
                                 .rotate(180f)
                         )
+                        // West
                         Text(
                             text = "W",
                             fontSize = 13.sp,
@@ -1336,28 +1488,40 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                         )
                     }
 
+                    // North & South direction pointers on dial
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val center = Offset(size.width / 2, size.height / 2)
-                        val radius = size.minDimension / 2 - 16f
+                        val radius = size.minDimension / 2 - 14f
 
                         val northPointer = Path().apply {
-                            moveTo(center.x, center.y - radius + 40.dp.toPx())
-                            lineTo(center.x - 5.dp.toPx(), center.y - 45.dp.toPx())
-                            lineTo(center.x + 5.dp.toPx(), center.y - 45.dp.toPx())
+                            moveTo(center.x, center.y - radius + 42.dp.toPx())
+                            lineTo(center.x - 5.dp.toPx(), center.y - 48.dp.toPx())
+                            lineTo(center.x + 5.dp.toPx(), center.y - 48.dp.toPx())
                             close()
                         }
-                        drawPath(northPointer, color = Color.Gray.copy(alpha = 0.35f))
+                        drawPath(northPointer, color = NoticeRed.copy(alpha = 0.4f))
 
                         val southPointer = Path().apply {
-                            moveTo(center.x, center.y + radius - 40.dp.toPx())
-                            lineTo(center.x - 5.dp.toPx(), center.y + 45.dp.toPx())
-                            lineTo(center.x + 5.dp.toPx(), center.y + 45.dp.toPx())
+                            moveTo(center.x, center.y + radius - 42.dp.toPx())
+                            lineTo(center.x - 5.dp.toPx(), center.y + 48.dp.toPx())
+                            lineTo(center.x + 5.dp.toPx(), center.y + 48.dp.toPx())
                             close()
                         }
-                        drawPath(southPointer, color = Color.Gray.copy(alpha = 0.15f))
+                        drawPath(southPointer, color = Color.Gray.copy(alpha = 0.18f))
+
+                        // KAABA MARKER ON ROTATING DIAL RIM AT BEARING ANGLE
+                        rotate(degrees = compassState.bearingToKaaba, pivot = center) {
+                            // Gold dot marker on the rim
+                            drawCircle(
+                                color = GoldAccent,
+                                radius = 4.dp.toPx(),
+                                center = Offset(center.x, center.y - radius + 12.dp.toPx())
+                            )
+                        }
                     }
                 }
 
+                // SCULPTED QIBLA AIM NEEDLE (Points directly at Kaaba relative to top of phone)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1366,40 +1530,50 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val center = Offset(size.width / 2, size.height / 2)
-                        val radius = size.minDimension / 2 - 16f
+                        val radius = size.minDimension / 2 - 14f
 
+                        // Outer gold arrow
                         val outerNeedle = Path().apply {
                             moveTo(center.x, center.y - radius + 15.dp.toPx())
                             lineTo(center.x - 13.dp.toPx(), center.y - radius + 38.dp.toPx())
                             lineTo(center.x - 4.dp.toPx(), center.y - radius + 33.dp.toPx())
-                            lineTo(center.x - 3.dp.toPx(), center.y - 24.dp.toPx())
-                            lineTo(center.x + 3.dp.toPx(), center.y - 24.dp.toPx())
+                            lineTo(center.x - 3.dp.toPx(), center.y - 26.dp.toPx())
+                            lineTo(center.x + 3.dp.toPx(), center.y - 26.dp.toPx())
                             lineTo(center.x + 4.dp.toPx(), center.y - radius + 33.dp.toPx())
                             lineTo(center.x + 13.dp.toPx(), center.y - radius + 38.dp.toPx())
                             close()
                         }
-                        drawPath(outerNeedle, color = GoldAccent)
+                        drawPath(
+                            outerNeedle,
+                            color = if (isAligned) GoldAccent else GoldAccent.copy(alpha = 0.85f)
+                        )
 
+                        // Inner emerald arrow core
                         val innerNeedle = Path().apply {
                             moveTo(center.x, center.y - radius + 21.dp.toPx())
                             lineTo(center.x - 8.dp.toPx(), center.y - radius + 35.dp.toPx())
                             lineTo(center.x - 1.5.dp.toPx(), center.y - radius + 31.dp.toPx())
-                            lineTo(center.x - 1.5.dp.toPx(), center.y - 24.dp.toPx())
-                            lineTo(center.x + 1.5.dp.toPx(), center.y - 24.dp.toPx())
+                            lineTo(center.x - 1.5.dp.toPx(), center.y - 26.dp.toPx())
+                            lineTo(center.x + 1.5.dp.toPx(), center.y - 26.dp.toPx())
                             lineTo(center.x + 1.5.dp.toPx(), center.y - radius + 31.dp.toPx())
                             lineTo(center.x + 8.dp.toPx(), center.y - radius + 35.dp.toPx())
                             close()
                         }
-                        drawPath(innerNeedle, color = EmeraldGreen)
+                        drawPath(
+                            innerNeedle,
+                            color = if (isAligned) EmeraldGreenDark else EmeraldGreen
+                        )
 
+                        // Center alignment jewel dot
                         drawCircle(
-                            color = GoldAccent,
-                            radius = 2.5.dp.toPx(),
+                            color = if (isAligned) GoldAccentLight else GoldAccent,
+                            radius = 3.dp.toPx(),
                             center = Offset(center.x, center.y - radius + 48.dp.toPx())
                         )
                     }
                 }
 
+                // CENTER KAABA HUB & LEVEL BUBBLE INDICATOR
                 Box(
                     modifier = Modifier
                         .size(76.dp)
@@ -1408,76 +1582,189 @@ fun QiblaCompassScreen(viewModel: MosqueViewModel) {
                             Brush.radialGradient(
                                 colors = listOf(
                                     MaterialTheme.colorScheme.surface,
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                                    MaterialTheme.colorScheme.background.copy(alpha = 0.7f)
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                                    MaterialTheme.colorScheme.background.copy(alpha = 0.85f)
                                 )
                             )
                         )
                         .border(
-                            width = if (isAligned) 2.dp else 1.dp,
-                            color = if (isAligned) GoldAccent else EmeraldGreen.copy(alpha = 0.2f),
+                            width = if (isAligned) 2.5.dp else 1.5.dp,
+                            color = if (isAligned) GoldAccent else EmeraldGreen.copy(alpha = 0.3f),
                             shape = CircleShape
                         ),
                     contentAlignment = Alignment.Center
                 ) {
+                    // Level spirit bubble moving based on pitch and roll
+                    val bubbleOffsetX = (compassState.roll * 0.8f).coerceIn(-18f, 18f)
+                    val bubbleOffsetY = (compassState.pitch * 0.8f).coerceIn(-18f, 18f)
+
+                    Box(
+                        modifier = Modifier
+                            .offset(x = bubbleOffsetX.dp, y = bubbleOffsetY.dp)
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (compassState.isLevel) EmeraldGreen.copy(alpha = 0.25f)
+                                else NoticeRed.copy(alpha = 0.25f)
+                            )
+                    )
+
                     KaabaIcon()
                 }
             }
         }
 
+        // LOCATION & SENSOR CALIBRATION BAR
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = EmeraldGreen,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                        Text(
+                            text = compassState.locationName,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = String.format(Locale.US, "Lat: %.4f°, Lon: %.4f°", compassState.userLatitude, compassState.userLongitude),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Figure-8 calibration hint button
+                    IconButton(
+                        onClick = { showCalibrateDialog = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Calibration Info",
+                            tint = if (compassState.isCalibrated) EmeraldGreen else NoticeRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Refresh GPS location button
+                    IconButton(
+                        onClick = {
+                            isRefreshingLocation = true
+                            viewModel.refreshGPSLocation()
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                isRefreshingLocation = false
+                            }, 1000)
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh Location",
+                            tint = EmeraldGreen,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // COMPASS METRICS SUMMARY CARD
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(14.dp),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
+                // Qibla Direction
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = String.format(Locale.US, "%.0f° W", compassState.bearingToKaaba),
-                        fontSize = 18.sp,
+                        text = String.format(Locale.US, "%.1f° %s", compassState.bearingToKaaba, getCompassDirectionLabel(compassState.bearingToKaaba)),
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = EmeraldGreen
                     )
                     Text(
-                        text = "Qibla Angle",
+                        text = "Qibla Direction",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                     )
                 }
 
+                // Kaaba Distance
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = String.format(Locale.US, "%,.0f km", compassState.distanceToKaabaKm),
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = EmeraldGreen
                     )
                     Text(
-                        text = "Distance",
+                        text = "Kaaba Distance",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                     )
                 }
 
+                // Phone Heading (True North)
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = String.format(Locale.US, "%.0f°", compassState.azimuth),
-                        fontSize = 18.sp,
+                        text = String.format(Locale.US, "%.0f° %s", compassState.azimuth, getCompassDirectionLabel(compassState.azimuth)),
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = EmeraldGreen
+                        color = if (isAligned) GoldAccent else EmeraldGreen
                     )
                     Text(
                         text = "Your Heading",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                    )
+                }
+
+                // Declination
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = String.format(Locale.US, "%+.1f°", compassState.declination),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                    )
+                    Text(
+                        text = "Declination",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                     )
                 }
             }

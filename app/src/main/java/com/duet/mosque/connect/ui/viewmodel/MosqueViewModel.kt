@@ -60,6 +60,7 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
 
     private val repository = MosqueRepository(application)
     private val compassManager = CompassSensorManager(application)
+    private val locationHelper = com.duet.mosque.connect.utils.LocationHelper(application)
 
     // Room cached data flows
     val schedules: StateFlow<List<ScheduleEntity>> = repository.allSchedules
@@ -156,17 +157,50 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // Start/Stop Compass listeners based on screen visible state
+    // Start/Stop Compass listeners and continuous location tracking based on screen visible state
     fun enableCompass(enable: Boolean) {
         if (enable) {
             compassManager.startListening()
+            refreshGPSLocation()
+            locationHelper.startContinuousLocationUpdates { loc ->
+                compassManager.updateLocation(
+                    latitude = loc.latitude,
+                    longitude = loc.longitude,
+                    altitude = loc.altitude,
+                    locationName = loc.locationName,
+                    isGps = loc.isGpsActive
+                )
+            }
         } else {
             compassManager.stopListening()
+            locationHelper.stopContinuousLocationUpdates()
         }
     }
 
-    fun updateGPSLocation(lat: Double, lon: Double) {
-        compassManager.updateLocation(lat, lon)
+    fun updateGPSLocation(
+        lat: Double,
+        lon: Double,
+        altitude: Double = 15.0,
+        name: String = "",
+        isGps: Boolean = true
+    ) {
+        compassManager.updateLocation(lat, lon, altitude, name, isGps)
+    }
+
+    fun refreshGPSLocation() {
+        locationHelper.requestFreshLocation { loc ->
+            compassManager.updateLocation(
+                latitude = loc.latitude,
+                longitude = loc.longitude,
+                altitude = loc.altitude,
+                locationName = loc.locationName,
+                isGps = loc.isGpsActive
+            )
+        }
+    }
+
+    fun setCompassDisplayRotation(rotation: Int) {
+        compassManager.setDisplayRotation(rotation)
     }
 
     // Authentication & Security Actions
@@ -373,6 +407,7 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         compassManager.stopListening()
+        locationHelper.stopContinuousLocationUpdates()
         timerJob?.cancel()
     }
 }
