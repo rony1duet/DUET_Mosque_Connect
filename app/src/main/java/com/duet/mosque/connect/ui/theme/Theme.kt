@@ -11,6 +11,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
+/**
+ * ============================================================================
+ * THEME SYSTEM: MATERIAL 3 COLOR SCHEMES & THEME PROVIDER
+ * ============================================================================
+ *
+ * HOW DOES THEMING WORK IN JETPACK COMPOSE?
+ * -----------------------------------------
+ * 1. We create two `ColorScheme` objects: `DarkColorScheme` and `LightColorScheme`.
+ *    Each maps Material 3 standard color tokens (primary, surface, background, error, etc.)
+ *    to our custom brand colors.
+ *
+ * 2. `@Composable fun MyApplicationTheme(...)`:
+ *    A wrapper Composable that surrounds our app UI with `MaterialTheme(...)`.
+ *    Any child Composable inside `MyApplicationTheme` can access these colors via:
+ *    `MaterialTheme.colorScheme.primary`, `MaterialTheme.colorScheme.surface`, etc.
+ *
+ * 3. `isSystemInDarkTheme()`:
+ *    A Compose utility that automatically checks if the Android device is currently
+ *    set to System Dark Mode or Light Mode.
+ */
+
+// --- Dark Mode Color Scheme ---
 private val DarkColorScheme = darkColorScheme(
     primary = EmeraldGreen,
     onPrimary = Color.White,
@@ -33,6 +55,7 @@ private val DarkColorScheme = darkColorScheme(
     outline = CardBorderDark
 )
 
+// --- Light Mode Color Scheme ---
 private val LightColorScheme = lightColorScheme(
     primary = EmeraldGreen,
     onPrimary = Color.White,
@@ -55,6 +78,14 @@ private val LightColorScheme = lightColorScheme(
     outline = CardBorderLight
 )
 
+/**
+ * Root Theme Wrapper for DUET Mosque Connect.
+ *
+ * @param darkTheme Whether to render dark mode colors (defaults to system setting).
+ * @param dynamicColor Android 12+ wallpaper dynamic theming. Kept `false` by default
+ *                     to preserve the custom DUET Mosque emerald brand identity.
+ * @param content The composable UI tree to render inside this theme.
+ */
 @Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -76,4 +107,5 @@ fun MyApplicationTheme(
         content = content
     )
 }
+
 

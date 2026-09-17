@@ -19,22 +19,45 @@ import com.duet.mosque.connect.ui.screens.MainAppContainer
 import com.duet.mosque.connect.ui.theme.MyApplicationTheme
 import com.duet.mosque.connect.ui.viewmodel.MosqueViewModel
 
+/**
+ * =====================================================================================
+ * PROJECT ENTRY POINT
+ * =====================================================================================
+ * [MainActivity] is the primary Android Activity and the entry point of the application.
+ * When the app launches, the Android OS invokes [onCreate], which initializes the theme,
+ * requests necessary permissions (such as push notifications for Android 13+), and sets
+ * the root Compose UI container ([MainAppContainer]).
+ *
+ * Kotlin Syntax Note for Beginners:
+ * - `class MainActivity : ComponentActivity()`: Inherits from AndroidX [ComponentActivity].
+ * - `override fun onCreate(...)`: Overrides the lifecycle method called when the activity is created.
+ * - `val`: Defines an immutable (read-only) variable.
+ * =====================================================================================
+ */
 class MainActivity : ComponentActivity() {
+
+    /**
+     * Entry point lifecycle callback where the UI and ViewModel are initialized.
+     */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // setContent establishes the Jetpack Compose declarative UI tree
         setContent {
             MyApplicationTheme {
+                // Initialize the central ViewModel for state and business logic
                 val viewModel: MosqueViewModel = viewModel()
                 val context = LocalContext.current
 
-                // Request Notification Permission for Android 13+
+                // Launcher for requesting runtime notification permissions on Android 13 (Tiramisu) and above
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
                 ) { isGranted ->
-                    // Handle permission result if needed
+                    // Permission result callback
                 }
 
+                // LaunchedEffect runs once when entering composition to check and request notification permission
                 LaunchedEffect(Unit) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         if (ContextCompat.checkSelfPermission(
@@ -47,9 +70,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Surface wraps the app content with the theme's background color
                 Surface(
                     color = MaterialTheme.colorScheme.background
                 ) {
+                    // Flow exit point: handing over control to the main UI container view
                     MainAppContainer(viewModel = viewModel)
                 }
             }

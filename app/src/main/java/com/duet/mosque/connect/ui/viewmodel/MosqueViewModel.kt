@@ -4,15 +4,16 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.duet.mosque.connect.data.model.NewsEntity
 import com.duet.mosque.connect.data.model.EidEntity
 import com.duet.mosque.connect.data.model.EventEntity
 import com.duet.mosque.connect.data.model.JanazaEntity
-import com.duet.mosque.connect.data.model.ScheduleEntity
+import com.duet.mosque.connect.data.model.NewsEntity
 import com.duet.mosque.connect.data.model.RamadanEntity
+import com.duet.mosque.connect.data.model.ScheduleEntity
 import com.duet.mosque.connect.data.repository.MosqueRepository
 import com.duet.mosque.connect.utils.CompassData
 import com.duet.mosque.connect.utils.CompassSensorManager
+import com.duet.mosque.connect.utils.LocationHelper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,22 +27,61 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
-// Simulated local FCM notification record
+/**
+ * =========================================================================================
+ * VIEWMODEL LAYER: APPLICATION STATE & BUSINESS LOGIC (DUET Mosque Connect)
+ * =========================================================================================
+ * [MosqueViewModel] acts as the bridge connecting the UI Compose screens to the data layer
+ * ([MosqueRepository]), sensor manager ([CompassSensorManager]), and location provider ([LocationHelper]).
+ *
+ * Key Responsibilities:
+ *  1. [State Management]: Exposes read-only `StateFlow` streams that Jetpack Compose observes via `collectAsState()`.
+ *  2. [Live Countdown Engine]: Runs a 1-second interval coroutine ticker calculating exact time remaining
+ *     until the next Jamat prayer.
+ *  3. [Authentication & Security]: Manages Imam login status, rate-limited lockout countdown (30s lock
+ *     after 3 failed attempts), and passcode changing.
+ *  4. [Sensor & Location Control]: Coordinates compass hardware sensor registration and GPS location updates.
+ *  5. [Component Teardown / End Point]: Implements `onCleared()` to cancel background timers and
+ *     unregister sensor hardware listeners when the ViewModel is destroyed.
+ *
+ * Kotlin Concepts Explained for Beginners:
+ *  - `AndroidViewModel(application)`: A ViewModel with access to the Android Application Context.
+ *  - `MutableStateFlow` vs `StateFlow`:
+ *      * `_isAdminLoggedIn` (MutableStateFlow) is private and can be modified inside the ViewModel.
+ *      * `isAdminLoggedIn` (StateFlow) is public and read-only, preventing external classes from
+ *        accidentally mutating state.
+ *  - `stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), default)`: Converts cold Room
+ *    `Flow`s into hot `StateFlow`s that automatically pause when the app is in the background.
+ *  - `viewModelScope.launch { ... }`: Launches a Kotlin Coroutine bound to this ViewModel's lifecycle.
+ * =========================================================================================
+ */
+
+/**
+ * Data model for in-app push notification log entries.
+ */
 data class NotificationLog(
-    val id: String = java.util.UUID.randomUUID().toString(),
+    val id: String = UUID.randomUUID().toString(),
     val title: String,
     val body: String,
     val timestamp: Long = System.currentTimeMillis()
 )
 
+/**
+ * Data model for active notification banners.
+ */
 data class ActiveNotificationBanner(
-    val id: String = java.util.UUID.randomUUID().toString(),
+    val id: String = UUID.randomUUID().toString(),
     val title: String,
     val body: String,
     val timestamp: Long = System.currentTimeMillis()
 )
 
+/**
+ * Helper to ensure prayers are always sorted in canonical Islamic order:
+ * 1. Fajr -> 2. Dhuhr -> 3. Asr -> 4. Maghrib -> 5. Isha -> 6. Jummah
+ */
 private fun getPrayerOrderRank(entity: ScheduleEntity): Int {
     val id = entity.id.lowercase()
     val name = entity.name.lowercase()
@@ -60,9 +100,11 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
 
     private val repository = MosqueRepository(application)
     private val compassManager = CompassSensorManager(application)
-    private val locationHelper = com.duet.mosque.connect.utils.LocationHelper(application)
+    private val locationHelper = LocationHelper(application)
 
-    // Room cached data flows
+    // -------------------------------------------------------------------------------------
+    // 1. REACTIVE ROOM DATA STREAMS
+    // -------------------------------------------------------------------------------------
     val schedules: StateFlow<List<ScheduleEntity>> = repository.allSchedules
         .map { list -> list.sortedBy { getPrayerOrderRank(it) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -82,10 +124,12 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     val eidSchedule: StateFlow<EidEntity?> = repository.eidSchedule
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    // Qibla direction data flow
+    // Qibla Direction & Heading Stream
     val compassState: StateFlow<CompassData> = compassManager.compassState
 
-    // Authentication & Security State
+    // -------------------------------------------------------------------------------------
+    // 2. AUTHENTICATION & SECURITY STATE
+    // -------------------------------------------------------------------------------------
     private val secPrefs = application.getSharedPreferences("duet_mosque_sec_prefs", Context.MODE_PRIVATE)
     private val _isAdminLoggedIn = MutableStateFlow(false)
     val isAdminLoggedIn: StateFlow<Boolean> = _isAdminLoggedIn.asStateFlow()
@@ -95,7 +139,9 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
 
     private var failedAttempts = 0
 
-    // User Settings State
+    // -------------------------------------------------------------------------------------
+    // 3. USER PREFERENCES STATE (Stored in SharedPreferences)
+    // -------------------------------------------------------------------------------------
     private val _jamatRemindersEnabled = MutableStateFlow(secPrefs.getBoolean("pref_jamat_reminders", true))
     val jamatRemindersEnabled: StateFlow<Boolean> = _jamatRemindersEnabled.asStateFlow()
 
@@ -124,7 +170,9 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         return secPrefs.getString("admin_passcode", null) ?: "admin"
     }
 
-    // Active prayer state
+    // -------------------------------------------------------------------------------------
+    // 4. ACTIVE PRAYER & LIVE COUNTDOWN STATE
+    // -------------------------------------------------------------------------------------
     private val _currentPrayerName = MutableStateFlow("Asr")
     val currentPrayerName: StateFlow<String> = _currentPrayerName.asStateFlow()
 
@@ -137,27 +185,31 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
     private val _countdownTimer = MutableStateFlow("12:45 remaining")
     val countdownTimer: StateFlow<String> = _countdownTimer.asStateFlow()
 
-    // Simulated FCM notification history log
+    // In-app FCM notification history log
     private val _notificationLogs = MutableStateFlow<List<NotificationLog>>(emptyList())
     val notificationLogs: StateFlow<List<NotificationLog>> = _notificationLogs.asStateFlow()
 
     private var timerJob: Job? = null
 
     init {
+        // Wire remote notification callback from repository into in-app log list
         repository.onRemoteNotificationReceived = { title, body, timestamp ->
             if (_eventNoticesEnabled.value) {
                 val newLog = NotificationLog(title = title, body = body, timestamp = timestamp)
                 _notificationLogs.value = (listOf(newLog) + _notificationLogs.value).distinctBy { it.id }
             }
         }
-        // Ensure initial data is seeded
+
+        // Initialize SQLite default seed data & start 1-second countdown ticker
         viewModelScope.launch {
             repository.checkAndSeedDatabase()
             startCountdownTimer()
         }
     }
 
-    // Start/Stop Compass listeners and continuous location tracking based on screen visible state
+    // -------------------------------------------------------------------------------------
+    // 5. HARDWARE SENSORS & GPS LOCATION COORDINATION
+    // -------------------------------------------------------------------------------------
     fun enableCompass(enable: Boolean) {
         if (enable) {
             compassManager.startListening()
@@ -203,7 +255,9 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         compassManager.setDisplayRotation(rotation)
     }
 
-    // Authentication & Security Actions
+    // -------------------------------------------------------------------------------------
+    // 6. AUTHENTICATION & ACCESS KEY MANAGEMENT
+    // -------------------------------------------------------------------------------------
     fun loginAsImam(password: String): Boolean {
         if (_lockoutSeconds.value > 0) return false
 
@@ -252,11 +306,12 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         _notificationLogs.value = emptyList()
     }
 
-    // Database Actions (Imam/Admin only)
+    // -------------------------------------------------------------------------------------
+    // 7. DATABASE & FIRESTORE ACTIONS (Imam Only)
+    // -------------------------------------------------------------------------------------
     fun updateSchedule(id: String, name: String, azanTime: String, jamatTime: String) {
         viewModelScope.launch {
             repository.updateSchedule(id, name, azanTime, jamatTime)
-            // Trigger automatic countdown re-calc
             calculateNextJamat(schedules.value)
         }
     }
@@ -315,7 +370,6 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // Push Notifications & Alerts Broadcast
     fun sendSimulatedPushNotification(title: String, body: String) {
         if (_eventNoticesEnabled.value) {
             viewModelScope.launch {
@@ -324,13 +378,15 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // Dynamic Countdown and current active prayer parser
+    // -------------------------------------------------------------------------------------
+    // 8. LIVE COUNTDOWN TICKER & NEXT PRAYER CALCULATOR
+    // -------------------------------------------------------------------------------------
     private fun startCountdownTimer() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
             while (true) {
                 calculateNextJamat(schedules.value)
-                delay(1000)
+                delay(1000) // Ticks once every second
             }
         }
     }
@@ -347,7 +403,6 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         var nextPrayer: ScheduleEntity? = null
         var minDiff = Int.MAX_VALUE
 
-        // Parse and sort all prayers by their Jamat times
         val parser = SimpleDateFormat("hh:mm a", Locale.US)
 
         val parsedPrayers = prayers.mapNotNull { prayer ->
@@ -356,7 +411,7 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
                 val cal = Calendar.getInstance().apply { time = date }
                 val timeInMinutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
                 Triple(prayer, timeInMinutes, prayer.jamatTime)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 null
             }
         }.sortedBy { it.second }
@@ -370,7 +425,7 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // If no prayers left today, the next one is Fajr tomorrow
+        // If all prayers for today have passed, the next prayer is Fajr tomorrow
         val finalNextPrayer = if (foundNext && nextPrayer != null) {
             nextPrayer
         } else {
@@ -380,7 +435,6 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
         val finalDiffMinutes = if (foundNext) {
             minDiff
         } else {
-            // Minutes until midnight + minutes tomorrow to the first jamat
             val minutesUntilMidnight = (24 * 60) - currentTimeInMinutes
             val firstJamatTomorrowMinutes = parsedPrayers.firstOrNull()?.second ?: 300 // 5:00 AM default
             minutesUntilMidnight + firstJamatTomorrowMinutes
@@ -399,11 +453,16 @@ class MosqueViewModel(application: Application) : AndroidViewModel(application) 
             String.format(Locale.US, "%02d:%02d remaining", minutes, seconds)
         }
         _countdownTimer.value = countdownStr
-
-        // Set active prayer name to finalNextPrayer name
         _currentPrayerName.value = finalNextPrayer.name
     }
 
+    // -------------------------------------------------------------------------------------
+    // 9. [END POINT / TEARDOWN LIFECYCLE CALLBACK]
+    // -------------------------------------------------------------------------------------
+    /**
+     * Called when the ViewModel is destroyed (e.g. app process closed or user navigates away).
+     * Stops hardware sensor listening and cancels active coroutine timers to prevent memory leaks.
+     */
     override fun onCleared() {
         super.onCleared()
         compassManager.stopListening()

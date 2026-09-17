@@ -17,7 +17,33 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import java.util.Locale
+import kotlin.math.abs
 
+/**
+ * =========================================================================================
+ * HARDWARE / SYSTEM: LOCATION HELPER (DUET Mosque Connect)
+ * =========================================================================================
+ * Manages GPS device location fetching via Google Play Services [FusedLocationProviderClient].
+ *
+ * Capabilities:
+ *  1. Runtime Permission Verification (`ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION`).
+ *  2. High-Accuracy One-Shot Location Request (with fallback to last known location).
+ *  3. Continuous GPS tracking for live Qibla bearing recalculations.
+ *  4. Reverse-Geocoding: Converts raw coordinates into clean human-readable names (e.g. "Gazipur, Bangladesh").
+ *  5. Graceful Fallback: Defaults to DUET Central Campus (23.9999° N, 90.4201° E) if GPS is disabled.
+ *
+ * Kotlin Concepts Explained for Beginners:
+ *  - `data class UserLocationInfo(...)`: Holds latitude, longitude, accuracy, and formatted address.
+ *  - `@Suppress("MissingPermission")`: Suppresses IDE lint warnings after we manually verify permissions
+ *    with `hasLocationPermission()`.
+ *  - Lambda callbacks: `onLocationReceived: (UserLocationInfo) -> Unit` allows passing the result
+ *    asynchronously once GPS hardware responds.
+ * =========================================================================================
+ */
+
+/**
+ * Holds GPS and Geocoded location state.
+ */
 data class UserLocationInfo(
     val latitude: Double = 23.9999, // DUET, Gazipur fallback
     val longitude: Double = 90.4201,
@@ -36,6 +62,9 @@ class LocationHelper(private val context: Context) {
     private var locationCallback: LocationCallback? = null
     private var cancellationTokenSource: CancellationTokenSource? = null
 
+    /**
+     * Checks if the user has granted either FINE or COARSE location runtime permissions.
+     */
     fun hasLocationPermission(): Boolean {
         val fineLocation = ContextCompat.checkSelfPermission(
             context,
@@ -50,6 +79,9 @@ class LocationHelper(private val context: Context) {
         return fineLocation || coarseLocation
     }
 
+    /**
+     * Requests a fresh high-accuracy GPS fix from Google Play Services.
+     */
     @Suppress("MissingPermission")
     fun requestFreshLocation(onLocationReceived: (UserLocationInfo) -> Unit) {
         if (!hasLocationPermission()) {
@@ -68,7 +100,6 @@ class LocationHelper(private val context: Context) {
         val tokenSource = CancellationTokenSource()
         cancellationTokenSource = tokenSource
 
-        // Try getting accurate current location
         try {
             fusedLocationClient.getCurrentLocation(
                 Priority.PRIORITY_HIGH_ACCURACY,
@@ -107,7 +138,7 @@ class LocationHelper(private val context: Context) {
                     }
                 }
             }.addOnFailureListener {
-                // If high accuracy fails, attempt last location
+                // If high accuracy fails, attempt last known location
                 fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc: Location? ->
                     if (lastLoc != null) {
                         val locName = resolveLocationName(lastLoc.latitude, lastLoc.longitude)
@@ -129,6 +160,9 @@ class LocationHelper(private val context: Context) {
         }
     }
 
+    /**
+     * Starts continuous GPS location updates while on the Qibla screen.
+     */
     @Suppress("MissingPermission")
     fun startContinuousLocationUpdates(onLocationReceived: (UserLocationInfo) -> Unit) {
         if (!hasLocationPermission()) return
@@ -168,6 +202,9 @@ class LocationHelper(private val context: Context) {
         }
     }
 
+    /**
+     * Stops continuous location updates to preserve device battery.
+     */
     fun stopContinuousLocationUpdates() {
         locationCallback?.let {
             fusedLocationClient.removeLocationUpdates(it)
@@ -177,11 +214,13 @@ class LocationHelper(private val context: Context) {
         cancellationTokenSource = null
     }
 
+    /**
+     * Converts latitude & longitude coordinates into a human-readable city / locality string.
+     */
     private fun resolveLocationName(lat: Double, lon: Double): String {
         return try {
             val geocoder = Geocoder(context, Locale.getDefault())
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Async geocoding not blocking; default string then formatted
                 val addresses = geocoder.getFromLocation(lat, lon, 1)
                 formatAddress(addresses?.firstOrNull(), lat, lon)
             } else {
@@ -189,7 +228,7 @@ class LocationHelper(private val context: Context) {
                 val addresses = geocoder.getFromLocation(lat, lon, 1)
                 formatAddress(addresses?.firstOrNull(), lat, lon)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             formatCoordinates(lat, lon)
         }
     }
@@ -209,6 +248,6 @@ class LocationHelper(private val context: Context) {
     private fun formatCoordinates(lat: Double, lon: Double): String {
         val latDir = if (lat >= 0) "N" else "S"
         val lonDir = if (lon >= 0) "E" else "W"
-        return String.format(Locale.US, "%.4f° %s, %.4f° %s", Math.abs(lat), latDir, Math.abs(lon), lonDir)
+        return String.format(Locale.US, "%.4f° %s, %.4f° %s", abs(lat), latDir, abs(lon), lonDir)
     }
 }

@@ -6,31 +6,31 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// Set of Material typography styles to start with
-val Typography =
-  Typography(
-    bodyLarge =
-      TextStyle(
+/**
+ * ============================================================================
+ * TYPOGRAPHY: MATERIAL 3 TEXT STYLES
+ * ============================================================================
+ *
+ * WHAT IS TYPOGRAPHY?
+ * -------------------
+ * Material 3 defines text roles such as:
+ * - `displayLarge`, `displayMedium`, `displaySmall` (Huge headings)
+ * - `headlineLarge`, `headlineMedium`, `headlineSmall` (Section headers)
+ * - `titleLarge`, `titleMedium`, `titleSmall` (Card titles & subtitles)
+ * - `bodyLarge`, `bodyMedium`, `bodySmall` (Main body paragraph text)
+ * - `labelLarge`, `labelMedium`, `labelSmall` (Buttons & badges)
+ *
+ * `sp` (Scale-independent Pixels):
+ * Unlike fixed pixels (`px`), `sp` automatically respects the user's font size
+ * preferences set in Android system settings, ensuring accessibility.
+ */
+val Typography = Typography(
+    bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.5.sp,
-      )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
     )
-    */
-  )
+)
+

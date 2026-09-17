@@ -10,16 +10,44 @@ import android.view.Surface
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+/**
+ * =========================================================================================
+ * HARDWARE SENSORS: COMPASS & QIBLA MATH ENGINE (DUET Mosque Connect)
+ * =========================================================================================
+ * Interfaces directly with Android hardware sensors to compute live device orientation,
+ * tilt angles (pitch/roll), and calculate the precise bearing towards the Holy Kaaba.
+ *
+ * Mathematical & Hardware Pipeline:
+ *  1. [Sensor Acquisition]: Reads from TYPE_ROTATION_VECTOR (preferred) or falls back to
+ *     TYPE_ACCELEROMETER + TYPE_MAGNETIC_FIELD.
+ *  2. [Coordinate Remapping]: Remaps matrix coordinates based on the display's current rotation (Portrait/Landscape).
+ *  3. [Declination Correction]: Uses Android's `GeomagneticField` model to convert Magnetic Azimuth
+ *     into True Geographic North Azimuth based on the user's GPS coordinates.
+ *  4. [Jitter Smoothing]: Applies circular low-pass filtering to remove hand vibrations and sensor noise.
+ *  5. [Great-Circle Forward Azimuth]: Uses spherical trigonometry (Haversine & Forward Bearing)
+ *     to calculate the direct heading to Kaaba Sanctuary in Makkah (Lat: 21.422487° N, Lon: 39.826206° E).
+ *
+ * Kotlin Concepts Explained for Beginners:
+ *  - `class ... : SensorEventListener`: Implements the Android hardware sensor callback interface.
+ *  - `FloatArray(9)`: Pre-allocated arrays in memory used for 3x3 rotation matrices to avoid garbage collection churn.
+ *  - `StateFlow<CompassData>`: Emits updated calculations in real-time to the ViewModel and Compose UI.
+ * =========================================================================================
+ */
+
+/**
+ * Holds calculated compass and Qibla telemetry.
+ */
 data class CompassData(
     val azimuth: Float = 0f, // True Heading relative to True North (0° = North, 90° = East, etc.)
     val magneticAzimuth: Float = 0f, // Heading relative to Magnetic North
     val declination: Float = 0f, // Magnetic declination in degrees
-    val bearingToKaaba: Float = 278.4f, // True Angle from True North to Kaaba (approx for Bangladesh)
+    val bearingToKaaba: Float = 278.4f, // True Angle from True North to Kaaba (approx 278° for Bangladesh)
     val relativeAngle: Float = 0f, // Angle to rotate pointer from top of phone: (bearingToKaaba - azimuth + 360) % 360
     val distanceToKaabaKm: Double = 4820.0,
     val pitch: Float = 0f, // Pitch angle in degrees (-90 to 90)
@@ -38,7 +66,7 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
-    // Available sensors
+    // Hardware sensors
     private val rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val geomagneticVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR)
     private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -57,7 +85,7 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
     )
     val compassState: StateFlow<CompassData> = _compassState.asStateFlow()
 
-    // Sensor buffers & matrices
+    // Sensor buffers & matrices (reused to avoid memory allocations)
     private val rotationMatrix = FloatArray(9)
     private val remappedMatrix = FloatArray(9)
     private val orientationAngles = FloatArray(3)
@@ -78,7 +106,7 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
     private var isGpsActive = false
     private var magneticDeclination = 0f
 
-    // Kaaba Sanctuary Coordinates (Makkah Al-Mukarramah)
+    // Kaaba Sanctuary Coordinates (Makkah Al-Mukarramah, Saudi Arabia)
     private val kaabaLatitude = 21.422487
     private val kaabaLongitude = 39.826206
 
@@ -128,6 +156,9 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
         }
     }
 
+    /**
+     * Registers hardware sensor listeners when entering the Qibla screen.
+     */
     fun startListening() {
         isFirstReading = true
         when {
@@ -164,6 +195,9 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
         }
     }
 
+    /**
+     * Unregisters hardware sensor listeners when exiting the Qibla screen to preserve battery.
+     */
     fun stopListening() {
         sensorManager.unregisterListener(this)
         lastAccelerometerSet = false
@@ -180,11 +214,9 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
             matrixComputed = true
         } else if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-            // Apply low-pass filter to raw accelerometer data
             lowPassFilter(event.values, lastAccelerometer, 0.2f)
             lastAccelerometerSet = true
         } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
-            // Apply low-pass filter to raw magnetometer data
             lowPassFilter(event.values, lastMagnetometer, 0.2f)
             lastMagnetometerSet = true
         }
@@ -199,18 +231,18 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
         }
 
         if (matrixComputed) {
-            // Remap coordinate system based on current display rotation
+            // Remap coordinate system based on current screen rotation
             remapForDisplayRotation(rotationMatrix, remappedMatrix, displayRotation)
             SensorManager.getOrientation(remappedMatrix, orientationAngles)
 
-            // Azimuth (radians -> degrees: 0° to 360°)
+            // Magnetic Azimuth in degrees (0° to 360°)
             var magAzimuthDegrees = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
             magAzimuthDegrees = (magAzimuthDegrees + 360f) % 360f
 
-            // Correct for True North using Geomagnetic Declination
+            // True North Azimuth = Magnetic Azimuth + Geomagnetic Declination
             val trueAzimuthDegrees = (magAzimuthDegrees + magneticDeclination + 360f) % 360f
 
-            // Smooth azimuth with circular low-pass filter
+            // Smooth azimuth using circular low-pass filter
             if (isFirstReading) {
                 smoothedAzimuth = trueAzimuthDegrees
                 isFirstReading = false
@@ -218,10 +250,10 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
                 smoothedAzimuth = smoothCircularAngle(smoothedAzimuth, trueAzimuthDegrees, 0.25f)
             }
 
-            // Pitch & Roll in degrees
+            // Pitch and roll tilt angles in degrees
             val pitchDegrees = Math.toDegrees(orientationAngles[1].toDouble()).toFloat()
             val rollDegrees = Math.toDegrees(orientationAngles[2].toDouble()).toFloat()
-            val isLevel = Math.abs(pitchDegrees) < 30f && Math.abs(rollDegrees) < 30f
+            val isLevel = abs(pitchDegrees) < 30f && abs(rollDegrees) < 30f
 
             val isCalibrated = event.accuracy == SensorManager.SENSOR_STATUS_ACCURACY_HIGH ||
                     event.accuracy == SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM
@@ -316,7 +348,9 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
         )
     }
 
-    // Great-circle distance using Haversine formula
+    /**
+     * Great-circle distance calculation using Haversine formula.
+     */
     private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val earthRadiusKm = 6371.0
         val dLat = Math.toRadians(lat2 - lat1)
@@ -330,7 +364,9 @@ class CompassSensorManager(private val context: Context) : SensorEventListener {
         return earthRadiusKm * c
     }
 
-    // Direct Great-Circle forward azimuth (bearing) from Point A to Point B
+    /**
+     * Great-Circle initial forward azimuth (bearing) from Point A to Point B.
+     */
     private fun calculateBearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
         val lat1Rad = Math.toRadians(lat1)
         val lat2Rad = Math.toRadians(lat2)

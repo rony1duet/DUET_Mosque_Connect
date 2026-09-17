@@ -3,12 +3,12 @@ package com.duet.mosque.connect.data.repository
 import android.content.Context
 import android.util.Log
 import com.duet.mosque.connect.data.database.AppDatabase
-import com.duet.mosque.connect.data.model.NewsEntity
 import com.duet.mosque.connect.data.model.EidEntity
 import com.duet.mosque.connect.data.model.EventEntity
 import com.duet.mosque.connect.data.model.JanazaEntity
-import com.duet.mosque.connect.data.model.ScheduleEntity
+import com.duet.mosque.connect.data.model.NewsEntity
 import com.duet.mosque.connect.data.model.RamadanEntity
+import com.duet.mosque.connect.data.model.ScheduleEntity
 import com.duet.mosque.connect.utils.NotificationHelper
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
@@ -21,9 +21,35 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import java.util.UUID
 
+/**
+ * =========================================================================================
+ * DATA REPOSITORY PATTERN (DUET Mosque Connect)
+ * =========================================================================================
+ * The Repository serves as the "Single Source of Truth" bridging local offline storage (Room SQLite)
+ * and remote cloud synchronization (Firebase Firestore & Firebase Cloud Messaging).
+ *
+ * Architecture & Data Flow:
+ *  1. [Offline-First Local Cache]: The app reads directly from Room DAOs as reactive `Flow`s.
+ *     This ensures instantaneous app startup even with zero internet connectivity.
+ *  2. [Online Realtime Sync]: On startup, the repository initializes Firebase Firestore listeners
+ *     (`addSnapshotListener`). Whenever prayer times, announcements, or Janaza notices change in
+ *     the cloud, Firestore delivers a snapshot, which the repository writes directly into Room.
+ *  3. [Automatic UI Updates]: When Room database rows are updated by the repository, Room's
+ *     `Flow` automatically emits the new data to `MosqueViewModel`, triggering UI recomposition!
+ *  4. [Cross-Device Push Alerts]: When an Imam publishes a change, the repository writes a record to
+ *     the Firestore `PushNotifications` collection, which is received by all student devices in realtime.
+ *
+ * Kotlin Concepts Explained for Beginners:
+ *  - `CoroutineScope(Dispatchers.IO)`: Executes database and network tasks on dedicated background threads.
+ *  - `init { ... }`: The initializer block in Kotlin that runs immediately when an instance is created.
+ *  - `mapNotNull { ... }`: A functional transformation that filters out any null items automatically.
+ * =========================================================================================
+ */
 class MosqueRepository(private val context: Context) {
 
+    // Database & DAOs
     private val database = AppDatabase.getDatabase(context)
     private val scheduleDao = database.scheduleDao()
     private val newsDao = database.newsDao()
@@ -32,21 +58,23 @@ class MosqueRepository(private val context: Context) {
     private val ramadanDao = database.ramadanDao()
     private val eidDao = database.eidDao()
 
+    // Background IO Coroutine Scope
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
     private var firestore: FirebaseFirestore? = null
 
+    // Callback invoked when a remote notification is received while the app is active
     var onRemoteNotificationReceived: ((title: String, body: String, timestamp: Long) -> Unit)? = null
     private val processedNotificationIds = mutableSetOf<String>()
-    
+
     private val secPrefs = context.getSharedPreferences("duet_mosque_sec_prefs", Context.MODE_PRIVATE)
-    
-    // Unique device ID to identify the sender and prevent self-notifications
+
+    // Unique device identifier to prevent notifying the device that originated an action
     private val myDeviceId = getOrCreateDeviceId()
 
     private fun getOrCreateDeviceId(): String {
         var id = secPrefs.getString("my_device_unique_id", null)
         if (id == null) {
-            id = java.util.UUID.randomUUID().toString()
+            id = UUID.randomUUID().toString()
             secPrefs.edit().putString("my_device_unique_id", id).apply()
         }
         return id
@@ -57,7 +85,7 @@ class MosqueRepository(private val context: Context) {
             FirebaseApp.initializeApp(context)
             firestore = FirebaseFirestore.getInstance()
 
-            // Subscribe to global updates FCM topic for background notifications
+            // Subscribe to global updates FCM topic for background push notifications
             try {
                 FirebaseMessaging.getInstance().subscribeToTopic("global_updates")
                     .addOnCompleteListener { task ->
@@ -71,6 +99,7 @@ class MosqueRepository(private val context: Context) {
                 Log.w("MosqueRepository", "FCM initialization skipped: ${fcmEx.message}")
             }
 
+            // Initialize Firebase Anonymous Authentication before attaching listeners
             try {
                 val auth = FirebaseAuth.getInstance()
                 if (auth.currentUser == null) {
@@ -94,7 +123,7 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Flow getters (Room database serves as local offline cache)
+    // Reactive Flow Getters (Room database acts as the single source of truth for UI)
     val allSchedules: Flow<List<ScheduleEntity>> = scheduleDao.getAllSchedules()
     val allNews: Flow<List<NewsEntity>> = newsDao.getAllNews()
     val allEvents: Flow<List<EventEntity>> = eventDao.getAllEvents()
@@ -102,10 +131,13 @@ class MosqueRepository(private val context: Context) {
     val ramadanSchedule: Flow<RamadanEntity?> = ramadanDao.getRamadanSchedule()
     val eidSchedule: Flow<EidEntity?> = eidDao.getEidSchedule()
 
+    /**
+     * Sets up Firestore realtime snapshot listeners to sync cloud changes directly into Room SQLite.
+     */
     private fun setupRealtimeListeners() {
         val fs = firestore ?: return
 
-        // 1. Realtime Listener for Schedules
+        // 1. Realtime Listener for Prayer Schedules
         try {
             fs.collection("Schedule").addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -132,7 +164,7 @@ class MosqueRepository(private val context: Context) {
             Log.e("MosqueRepository", "Schedule listener failed: ${e.message}")
         }
 
-        // 2. Realtime Listener for News
+        // 2. Realtime Listener for News & Announcements
         try {
             fs.collection("News").addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
@@ -157,7 +189,7 @@ class MosqueRepository(private val context: Context) {
             Log.e("MosqueRepository", "News listener failed: ${e.message}")
         }
 
-        // 3. Realtime Listener for Events
+        // 3. Realtime Listener for Islamic Events
         try {
             fs.collection("Events").addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
@@ -212,7 +244,7 @@ class MosqueRepository(private val context: Context) {
             Log.e("MosqueRepository", "Janaza listener failed: ${e.message}")
         }
 
-        // 5. Realtime Listener for Ramadan/Solar Limits
+        // 5. Realtime Listener for Ramadan & Solar Limits
         try {
             fs.collection("Ramadan").document("main").addSnapshotListener { doc, error ->
                 if (error != null || doc == null || !doc.exists()) return@addSnapshotListener
@@ -264,7 +296,7 @@ class MosqueRepository(private val context: Context) {
             Log.e("MosqueRepository", "Eid listener failed: ${e.message}")
         }
 
-        // 7. Realtime Listener for Broadcast Push Notifications across ALL installed devices
+        // 7. Realtime Listener for Broadcast Push Notifications
         try {
             fs.collection("PushNotifications").addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
@@ -281,12 +313,12 @@ class MosqueRepository(private val context: Context) {
                             val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
                             val senderId = doc.getString("senderId") ?: ""
 
-                            // Check if this push notification is new and not yet processed on this device
+                            // Check if this push notification is new and not yet processed
                             if (ts > lastSeenTs && !processedNotificationIds.contains(docId)) {
                                 processedNotificationIds.add(docId)
                                 if (ts > maxTs) maxTs = ts
 
-                                // ONLY trigger system status bar notification if NOT the sender
+                                // Trigger status bar notification only if this device was NOT the sender
                                 if (senderId != myDeviceId) {
                                     val eventNoticesEnabled = secPrefs.getBoolean("pref_event_notices", true)
                                     if (eventNoticesEnabled) {
@@ -300,14 +332,14 @@ class MosqueRepository(private val context: Context) {
                                     }
                                 }
 
-                                // ALWAYS invoke the callback to update the in-app log list
+                                // Update in-app notification log callback
                                 onRemoteNotificationReceived?.invoke(title, body, ts)
                             } else if (ts <= lastSeenTs) {
                                 processedNotificationIds.add(docId)
                             }
                         }
                     }
-                    
+
                     if (maxTs > lastSeenTs) {
                         secPrefs.edit().putLong("last_notified_timestamp", maxTs).apply()
                     }
@@ -318,6 +350,9 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Checks if the SQLite database has initial seed data; if empty, populates default prayer times.
+     */
     suspend fun checkAndSeedDatabase() {
         val defaultPrayers = listOf(
             ScheduleEntity("fajr", "Fajr", "04:35 AM", "04:55 AM"),
@@ -390,7 +425,9 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Publish cross-device push notification to Firestore
+    /**
+     * Publishes a cross-device push alert record to Firestore.
+     */
     suspend fun publishPushNotification(title: String, body: String) {
         firestore?.let { fs ->
             try {
@@ -407,7 +444,8 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Update Schedule
+    // CRUD ACTIONS (Room + Firestore)
+
     suspend fun updateSchedule(id: String, name: String, azanTime: String, jamat: String) {
         val entity = ScheduleEntity(id, name, azanTime, jamat)
         scheduleDao.updateSchedule(entity)
@@ -422,7 +460,6 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Add News
     suspend fun addNews(title: String, content: String) {
         val entity = NewsEntity(title = title, content = content)
         newsDao.insertNews(entity)
@@ -437,7 +474,6 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Delete News
     suspend fun deleteNewsById(id: String) {
         newsDao.deleteNewsById(id)
         firestore?.let { fs ->
@@ -449,7 +485,6 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Add Event
     suspend fun addEvent(title: String, description: String, date: String, time: String, location: String) {
         val entity = EventEntity(title = title, description = description, date = date, time = time, location = location)
         eventDao.insertEvent(entity)
@@ -471,7 +506,6 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Delete Event
     suspend fun deleteEventById(id: String) {
         eventDao.deleteEventById(id)
         firestore?.let { fs ->
@@ -483,7 +517,6 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Add Janaza
     suspend fun addJanaza(name: String, date: String, time: String, location: String) {
         val entity = JanazaEntity(name = name, date = date, time = time, location = location)
         janazaDao.insertJanaza(entity)
@@ -504,7 +537,6 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Delete Janaza
     suspend fun deleteJanazaById(id: String) {
         janazaDao.deleteJanazaById(id)
         firestore?.let { fs ->
@@ -516,7 +548,6 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Update Ramadan & Fasting/Solar Limits
     suspend fun updateRamadanSchedule(
         sehri: String,
         iftar: String,
@@ -550,7 +581,6 @@ class MosqueRepository(private val context: Context) {
         }
     }
 
-    // Update Eid
     suspend fun updateEidSchedule(prayer: String, takbir: String, parking: String, notice: String, isEnabled: Boolean = true) {
         val entity = EidEntity(
             id = 1,

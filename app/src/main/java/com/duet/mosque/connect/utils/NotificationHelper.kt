@@ -19,6 +19,25 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.duet.mosque.connect.MainActivity
 
+/**
+ * =========================================================================================
+ * SYSTEM NOTIFICATIONS & CHANNELS MANAGER (DUET Mosque Connect)
+ * =========================================================================================
+ * Manages posting high-priority system status bar notifications on Android devices.
+ *
+ * Capabilities:
+ *  1. Notification Channel Creation (Required for Android 8.0 Oreo and above).
+ *  2. Rich Status Bar Notifications: Styled with Emerald Green branding, BigTextStyle for full notice text.
+ *  3. Deep Linking: Configures a PendingIntent so tapping the notification directly opens the app.
+ *  4. Audio & Vibration: Supports custom vibration patterns and notification audio sonification.
+ *  5. Android 13+ Permission Compliance: Verifies `POST_NOTIFICATIONS` permission before posting.
+ *
+ * Kotlin Concepts Explained for Beginners:
+ *  - `object NotificationHelper`: In Kotlin, `object` creates a Singleton class. You don't need
+ *    to instantiate it with `NotificationHelper()` — all methods are called directly as `NotificationHelper.method()`.
+ *  - `apply { ... }`: A Kotlin scope function that configures an object's properties and returns the object itself.
+ * =========================================================================================
+ */
 object NotificationHelper {
 
     private const val TAG = "NotificationHelper"
@@ -26,6 +45,9 @@ object NotificationHelper {
     private const val CHANNEL_NAME = "DUET Mosque Alerts & Notices"
     private const val CHANNEL_DESC = "Notifications for Jamat times, Prayer alerts, Janaza notices, and Mosque updates."
 
+    /**
+     * Creates the Android NotificationChannel for high-priority mosque alerts.
+     */
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
@@ -54,6 +76,9 @@ object NotificationHelper {
         }
     }
 
+    /**
+     * Posts a notification to the Android Status Bar.
+     */
     fun triggerSystemNotification(
         context: Context,
         title: String,
@@ -64,9 +89,6 @@ object NotificationHelper {
         Log.d(TAG, "Triggering notification: $title")
         createNotificationChannel(context)
 
-        // REMOVED manual triggerSound/vibration here to avoid double sound
-        // The system Notification Channel and Builder already handle this automatically.
-
         // Check POST_NOTIFICATIONS permission on Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -75,6 +97,7 @@ object NotificationHelper {
             }
         }
 
+        // Tap Intent to open MainActivity
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -90,7 +113,7 @@ object NotificationHelper {
 
         val iconRes = try {
             com.duet.mosque.connect.R.mipmap.ic_launcher
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             android.R.drawable.ic_dialog_info
         }
 
@@ -129,6 +152,9 @@ object NotificationHelper {
         }
     }
 
+    /**
+     * Triggers manual device vibration waveform.
+     */
     fun triggerVibration(context: Context) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -154,6 +180,9 @@ object NotificationHelper {
         }
     }
 
+    /**
+     * Plays system notification ringtone audio.
+     */
     fun triggerSound(context: Context) {
         try {
             val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
@@ -165,12 +194,10 @@ object NotificationHelper {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     ringtone.isLooping = false
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    ringtone.audioAttributes = AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                        .build()
-                }
+                ringtone.audioAttributes = AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .build()
                 ringtone.play()
             }
         } catch (e: Exception) {

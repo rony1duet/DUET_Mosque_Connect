@@ -4,16 +4,44 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-// Room entity to store prayer times
+/**
+ * =========================================================================================
+ * DATA LAYER: ROOM DATABASE ENTITIES (DUET Mosque Connect)
+ * =========================================================================================
+ * In Android Room (SQLite ORM), `@Entity` classes represent database tables, and each instance
+ * of the class represents a single row in that table.
+ *
+ * Kotlin Concepts Explained for Beginners:
+ *  1. `data class`: A Kotlin class whose primary purpose is holding data. Kotlin automatically
+ *     generates `equals()`, `hashCode()`, `toString()`, and `copy()` methods for data classes.
+ *  2. `@Entity(tableName = "...")`: Room annotation defining the SQLite table name.
+ *  3. `@PrimaryKey`: Specifies the unique identifier column for that table row.
+ *  4. Default Arguments (e.g. `val timestamp: Long = System.currentTimeMillis()`):
+ *     Kotlin allows specifying default parameter values so they don't have to be passed every time.
+ * =========================================================================================
+ */
+
+/**
+ * ScheduleEntity
+ * Represents a daily prayer schedule row in the SQLite 'Schedule' table.
+ *
+ * @property id Unique prayer key (e.g. "fajr", "zuhr", "asr", "maghrib", "isha", "jummah")
+ * @property name Human-readable prayer display name (e.g. "Fajr", "Dhuhr")
+ * @property azanTime Azan start time in 12-hour format (e.g. "04:35 AM")
+ * @property jamatTime Congregational prayer time in 12-hour format (e.g. "04:55 AM")
+ */
 @Entity(tableName = "Schedule")
 data class ScheduleEntity(
-    @PrimaryKey val id: String, // "fajr", "zuhr", "asr", "maghrib", "isha", "jummah"
+    @PrimaryKey val id: String,
     val name: String,
     val azanTime: String,
     val jamatTime: String
 )
 
-// Room entity for Announcements
+/**
+ * NewsEntity
+ * Represents a general announcement or news notice posted by the mosque administration.
+ */
 @Entity(tableName = "News")
 data class NewsEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
@@ -22,7 +50,10 @@ data class NewsEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-// Room entity for Islamic Events
+/**
+ * EventEntity
+ * Represents an upcoming Islamic event, lecture, or gathering on campus.
+ */
 @Entity(tableName = "Events")
 data class EventEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
@@ -34,7 +65,10 @@ data class EventEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-// Room entity for Janaza Notices
+/**
+ * JanazaEntity
+ * Represents a funeral / Janaza prayer announcement for a deceased community member.
+ */
 @Entity(tableName = "Janaza")
 data class JanazaEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
@@ -45,7 +79,11 @@ data class JanazaEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-// Room entity for Ramadan info & Fasting/Solar limits
+/**
+ * RamadanEntity
+ * Stores current fasting and solar limits (Sehri, Iftar, Sunrise, Sunset).
+ * Uses a single constant PrimaryKey (id = 1) since only one active limit record is needed.
+ */
 @Entity(tableName = "Ramadan")
 data class RamadanEntity(
     @PrimaryKey val id: Int = 1,
@@ -56,7 +94,11 @@ data class RamadanEntity(
     val notes: String = "Current Fasting & Solar Limits for DUET Central Mosque"
 )
 
-// Room entity for Eid info
+/**
+ * EidEntity
+ * Stores Eid prayer time, Takbir recitations schedule, parking info, and visibility toggle.
+ * Uses a single constant PrimaryKey (id = 1).
+ */
 @Entity(tableName = "Eid")
 data class EidEntity(
     @PrimaryKey val id: Int = 1,
